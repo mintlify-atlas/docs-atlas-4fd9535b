@@ -1,0 +1,108 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "typemux-cc",
+  "projectDescription": "Python type-checker LSP multiplexer for Claude Code that auto-detects .venv and routes to pyright/ty/pyrefly without requiring restarts",
+  "theme": "aspen",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/prerequisites",
+              "installation/marketplace",
+              "installation/local-build"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/basic-usage",
+              "usage/backend-selection",
+              "usage/worktrees",
+              "usage/monorepos"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/logging",
+              "configuration/config-file"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/architecture",
+              "advanced/multi-backend-pool",
+              "advanced/venv-detection",
+              "advanced/warmup-readiness"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/common-issues",
+              "troubleshooting/venv-not-switching",
+              "troubleshooting/plugin-updates"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/cli-flags",
+              "reference/environment-variables"
+            ]
+          },
+          {
+            "group": "Technical Details",
+            "pages": [
+              "reference/supported-backends",
+              "reference/requirements",
+              "reference/known-limitations"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Auto-detect .venv changes without Claude Code restart",
+    "Multi-backend support (pyright, ty, pyrefly)",
+    "Multi-project venv switching for monorepos",
+    "Git worktree support with late .venv creation",
+    "LRU backend pool with TTL-based eviction",
+    "Warmup readiness for accurate LSP results"
+  ],
+  "publicApiSurface": [
+    "typemux-cc --backend <pyright|ty|pyrefly>",
+    "typemux-cc --log-file <path>",
+    "typemux-cc --max-backends <number>",
+    "typemux-cc --backend-ttl <seconds>",
+    "TYPEMUX_CC_BACKEND environment variable",
+    "TYPEMUX_CC_LOG_FILE environment variable",
+    "TYPEMUX_CC_MAX_BACKENDS environment variable",
+    "TYPEMUX_CC_BACKEND_TTL environment variable",
+    "TYPEMUX_CC_WARMUP_TIMEOUT environment variable",
+    "Claude Code plugin commands: /plugin install typemux-cc@typemux-cc-marketplace",
+    "Claude Code plugin commands: /plugin disable pyright-lsp@claude-plugins-official"
+  ]
+}
