@@ -1,0 +1,209 @@
+---
+title: 'Environment Variables'
+description: 'Complete reference of environment variables for configuring typemux-cc'
+---
+
+typemux-cc can be configured through environment variables. These can be set directly when running the binary, or persistently via the [config file](/configuration/config-file).
+
+## Core Configuration
+
+### TYPEMUX_CC_BACKEND
+
+<ParamField path="TYPEMUX_CC_BACKEND" type="string" default="pyright">
+  The LSP backend to use for type-checking.
+  
+  **Valid values:**
+  - `pyright` - Microsoft's pyright type checker (default)
+  - `ty` - Astral's experimental type checker (by the creators of uv)
+  - `pyrefly` - Meta's experimental type checker
+  
+  **Example:**
+  ```bash
+  export TYPEMUX_CC_BACKEND="ty"
+  ```
+</ParamField>
+
+<Note>
+  Make sure the corresponding backend binary is available in your PATH:
+  - `pyright`: requires `pyright-langserver` command
+  - `ty`: requires `ty` command
+  - `pyrefly`: requires `pyrefly` command
+</Note>
+
+## Backend Pool Management
+
+### TYPEMUX_CC_MAX_BACKENDS
+
+<ParamField path="TYPEMUX_CC_MAX_BACKENDS" type="integer" default="8">
+  Maximum number of concurrent backend processes that can run simultaneously.
+  
+  Each virtual environment gets its own backend process. When the pool reaches this limit, the least recently used (LRU) backend will be evicted when a new one is needed.
+  
+  **Constraints:**
+  - Minimum value: `1`
+  - Recommended: `4-16` depending on available RAM
+  
+  **Example:**
+  ```bash
+  export TYPEMUX_CC_MAX_BACKENDS="16"
+  ```
+</ParamField>
+
+<Tip>
+  For monorepos with many projects, increase this value to avoid frequent backend restarts. Each backend consumes 100-500MB of RAM depending on project size.
+</Tip>
+
+### TYPEMUX_CC_BACKEND_TTL
+
+<ParamField path="TYPEMUX_CC_BACKEND_TTL" type="integer" default="1800">
+  Backend time-to-live in seconds. Idle backends are automatically evicted after this duration.
+  
+  **Default:** `1800` (30 minutes)
+  
+  **Special value:**
+  - `0` - Disables TTL-based eviction (backends only evicted when pool is full)
+  
+  **Example:**
+  ```bash
+  # 1 hour TTL
+  export TYPEMUX_CC_BACKEND_TTL="3600"
+  
+  # Disable TTL eviction
+  export TYPEMUX_CC_BACKEND_TTL="0"
+  ```
+</ParamField>
+
+<Info>
+  TTL helps reclaim memory from idle backends. Set to `0` if you frequently switch between many projects and want to avoid re-initialization delays.
+</Info>
+
+### TYPEMUX_CC_WARMUP_TIMEOUT
+
+<ParamField path="TYPEMUX_CC_WARMUP_TIMEOUT" type="integer" default="2">
+  Warmup timeout in seconds. After spawning, backends need time to build their cross-file index.
+  
+  During warmup, index-dependent requests (definition, references, implementation, typeDefinition) are queued. The backend transitions to "ready" when either:
+  1. The backend sends a `$/progress` end notification (index build complete)
+  2. This timeout expires (fail-open: queued requests are sent anyway)
+  
+  **Default:** `2` (seconds)
+  
+  **Special value:**
+  - `0` - Disables warmup entirely (all requests forwarded immediately)
+  
+  **Example:**
+  ```bash
+  # Wait up to 5 seconds for index build
+  export TYPEMUX_CC_WARMUP_TIMEOUT="5"
+  
+  # Disable warmup (forward all requests immediately)
+  export TYPEMUX_CC_WARMUP_TIMEOUT="0"
+  ```
+</ParamField>
+
+<Warning>
+  Setting this to `0` may cause incomplete results for "find references" and "go to definition" requests immediately after backend spawn.
+</Warning>
+
+## Logging Configuration
+
+### TYPEMUX_CC_LOG_FILE
+
+<ParamField path="TYPEMUX_CC_LOG_FILE" type="string" default="(not set)">
+  Path to log file for persistent logging.
+  
+  **Default behavior:** Logs are written to stderr only
+  
+  **When set:** Logs are written to both stderr AND the specified file
+  
+  **Example:**
+  ```bash
+  export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+  ```
+  
+  See [Logging](/configuration/logging) for monitoring and log analysis techniques.
+</ParamField>
+
+### RUST_LOG
+
+<ParamField path="RUST_LOG" type="string" default="typemux_cc=debug">
+  Controls logging verbosity. Uses the `tracing` crate's env filter syntax.
+  
+  **Common values:**
+  - `typemux_cc=info` - High-level events (venv switches, warmup transitions)
+  - `typemux_cc=debug` - **Default**. Includes venv search details and LSP method names
+  - `typemux_cc=trace` - Very verbose (all search steps, detailed debugging)
+  
+  **Example:**
+  ```bash
+  # Minimal logging
+  export RUST_LOG="typemux_cc=info"
+  
+  # Maximum verbosity
+  export RUST_LOG="typemux_cc=trace"
+  ```
+</ParamField>
+
+<Note>
+  The log level affects all output (both stderr and file). Lower verbosity improves performance but provides less debugging information.
+</Note>
+
+## Setting Environment Variables
+
+### Method 1: Direct Export (Temporary)
+
+```bash
+export TYPEMUX_CC_BACKEND="ty"
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+./target/release/typemux-cc
+```
+
+### Method 2: Inline (Single Execution)
+
+```bash
+TYPEMUX_CC_BACKEND=ty TYPEMUX_CC_LOG_FILE=/tmp/typemux-cc.log ./target/release/typemux-cc
+```
+
+### Method 3: Config File (Persistent)
+
+For persistent configuration across Claude Code restarts, use the config file:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_BACKEND="ty"
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+export TYPEMUX_CC_MAX_BACKENDS="16"
+export RUST_LOG="typemux_cc=debug"
+EOF
+```
+
+See [Config File](/configuration/config-file) for more details.
+
+## Precedence Rules
+
+When multiple configuration methods are used:
+
+1. **CLI flags** (e.g., `--backend ty`) - Highest priority
+2. **Environment variables** - Middle priority
+3. **Built-in defaults** - Lowest priority
+
+<Info>
+  CLI flags like `--backend`, `--max-backends`, `--backend-ttl`, and `--log-file` override the corresponding environment variables.
+</Info>
+
+## Quick Reference Table
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `TYPEMUX_CC_BACKEND` | string | `pyright` | LSP backend to use (pyright, ty, pyrefly) |
+| `TYPEMUX_CC_MAX_BACKENDS` | integer | `8` | Max concurrent backend processes (min: 1) |
+| `TYPEMUX_CC_BACKEND_TTL` | integer | `1800` | Backend TTL in seconds (0 = disabled) |
+| `TYPEMUX_CC_WARMUP_TIMEOUT` | integer | `2` | Warmup timeout in seconds (0 = disabled) |
+| `TYPEMUX_CC_LOG_FILE` | string | *(not set)* | Log file path (stderr + file when set) |
+| `RUST_LOG` | string | `typemux_cc=debug` | Log level (info, debug, trace) |
+
+## Related Pages
+
+- [Config File](/configuration/config-file) - Persistent configuration for Claude Code plugin
+- [Logging](/configuration/logging) - Log monitoring and analysis techniques

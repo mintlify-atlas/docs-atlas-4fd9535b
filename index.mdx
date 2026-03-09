@@ -1,97 +1,136 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: typemux-cc
+description: Python type-checker LSP multiplexer for Claude Code that auto-detects .venv and routes to pyright/ty/pyrefly without requiring restarts
 ---
 
-## Setting up
+<div className="flex flex-col items-center justify-center text-center py-12">
+  <h1 className="text-5xl font-bold mb-6" style={{ color: '#1a1a1a' }}>
+    typemux-cc
+  </h1>
+  <p className="text-xl mb-8 max-w-2xl" style={{ color: '#545454' }}>
+    Python type-checker LSP multiplexer for Claude Code — auto-detects .venv changes and routes to pyright, ty, or pyrefly without restarts
+  </p>
+</div>
 
-Get your documentation site up and running in minutes.
+## Problems Solved
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+Claude Code's official pyright plugin spawns a single LSP backend at startup and holds onto it. If `.venv` doesn't exist yet — or you create a new one later — it never picks it up. You have to restart Claude Code.
 
-## Make it yours
+This is especially painful with **git worktrees**, now common in AI-assisted development: you spin up a fresh worktree, create `.venv`, and then must restart Claude Code just to get type-checking.
 
-Design a docs site that looks great and empowers your users.
+**typemux-cc fixes this** — `.venv` changes are reflected within your running session, no restarts required.
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={3}>
+  <Card title="Late .venv Creation" icon="bolt">
+    Spin up a git worktree, create `.venv` later, and typemux-cc picks it up on the next file open. No Claude Code restart needed.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Multi-Project Switching" icon="rotate">
+    Keeps a per-`.venv` backend pool and routes requests to the correct one. Switching between projects in monorepos is instant.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Multi-Backend Support" icon="code-branch">
+    Not locked into pyright. Choose between pyright, ty, or pyrefly — switch via a single env var.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Supported Backends
 
-Everything you need to create world-class documentation.
+| Backend | Command | Status |
+|---------|---------|--------|
+| [pyright](https://github.com/microsoft/pyright) | `pyright-langserver --stdio` | ✅ Stable (default) |
+| [ty](https://github.com/astral-sh/ty) | `ty server` | 🧪 Experimental (verified) |
+| [pyrefly](https://github.com/facebook/pyrefly) | `pyrefly lsp` | 🧪 Experimental (verified) |
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Quick Start
 
-## Need inspiration?
+<Steps>
+  <Step title="Install a backend">
+    Install your preferred LSP backend (pyright recommended):
+    
+    <CodeGroup>
+    ```bash npm
+    npm install -g pyright
+    ```
+    
+    ```bash pip
+    pip install pyright
+    ```
+    
+    ```bash ty
+    pip install ty
+    ```
+    
+    ```bash pyrefly
+    pip install pyrefly
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Disable official pyright plugin">
+    You must disable the official pyright plugin to avoid conflicts:
+    
+    ```bash
+    /plugin disable pyright-lsp@claude-plugins-official
+    ```
+  </Step>
+  
+  <Step title="Install typemux-cc">
+    Add the marketplace and install the plugin:
+    
+    ```bash
+    /plugin marketplace add K-dash/typemux-cc
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+  </Step>
+  
+  <Step title="Restart Claude Code">
+    Restart Claude Code to activate the plugin. This is only required for initial installation — after this, `.venv` creation and switching no longer require restarts.
+  </Step>
+</Steps>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Auto-detect .venv changes" icon="magnifying-glass">
+    No Claude Code restart needed when creating or switching virtual environments
+  </Card>
+  <Card title="Multi-backend support" icon="layer-group">
+    Choose between pyright, ty, or pyrefly with a single environment variable
+  </Card>
+  <Card title="Git worktree support" icon="code-branch">
+    Create `.venv` after opening a worktree — typemux-cc picks it up automatically
+  </Card>
+  <Card title="Monorepo switching" icon="diagram-project">
+    Instant switching between projects with different `.venv` paths
+  </Card>
+  <Card title="LRU backend pool" icon="database">
+    Maintains multiple backend processes with automatic eviction when idle
+  </Card>
+  <Card title="Warmup readiness" icon="clock">
+    Queues index-dependent requests until backend finishes building its index
+  </Card>
+</CardGroup>
+
+## Why LSP over Text Search?
+
+In monorepos, grep returns false positives from same-named types across projects. LSP resolves references at the type-system level, providing accurate cross-file navigation and refactoring.
+
+<Note>
+  See the [architecture documentation](/advanced/architecture) for detailed design philosophy and implementation details.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation/prerequisites">
+    Detailed installation instructions for all platforms
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Configure backends, logging, and pool settings
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-issues">
+    Fix common issues and learn debugging techniques
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/advanced/architecture">
+    Understand how typemux-cc works under the hood
+  </Card>
+</CardGroup>

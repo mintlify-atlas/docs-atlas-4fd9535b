@@ -1,0 +1,384 @@
+---
+title: Backend Selection
+description: Choosing and configuring pyright, ty, or pyrefly
+---
+
+typemux-cc supports three Python type-checking backends. You can switch between them using environment variables or CLI flags.
+
+## Supported Backends
+
+<CardGroup cols={3}>
+  <Card title="pyright" icon="circle-check">
+    **Default** - Microsoft's fast type checker
+    
+    Status: ✅ Stable
+  </Card>
+  
+  <Card title="ty" icon="flask">
+    **Experimental** - By the creators of uv
+    
+    Status: 🧪 Verified
+  </Card>
+  
+  <Card title="pyrefly" icon="flask">
+    **Experimental** - Meta's type checker
+    
+    Status: 🧪 Verified
+  </Card>
+</CardGroup>
+
+## Backend Commands
+
+Each backend has a specific command and arguments used to spawn the LSP server:
+
+```rust
+// From src/backend.rs:27-41
+fn command(&self) -> &'static str {
+    match self {
+        Self::Pyright => "pyright-langserver",
+        Self::Ty => "ty",
+        Self::Pyrefly => "pyrefly",
+    }
+}
+
+fn args(&self) -> &'static [&'static str] {
+    match self {
+        Self::Pyright => &["--stdio"],
+        Self::Ty => &["server"],
+        Self::Pyrefly => &["lsp"],
+    }
+}
+```
+
+| Backend | Command | Arguments | Full invocation |
+|---------|---------|-----------|----------------|
+| pyright | `pyright-langserver` | `--stdio` | `pyright-langserver --stdio` |
+| ty | `ty` | `server` | `ty server` |
+| pyrefly | `pyrefly` | `lsp` | `pyrefly lsp` |
+
+## Installation
+
+You must install at least one backend before using typemux-cc.
+
+<Tabs>
+  <Tab title="pyright (recommended)">
+    ```bash
+    # Via npm (recommended)
+    npm install -g pyright
+
+    # Via pip
+    pip install pyright
+
+    # Verify installation
+    which pyright-langserver
+    pyright-langserver --version
+    ```
+  </Tab>
+  
+  <Tab title="ty (experimental)">
+    ```bash
+    # Via pip
+    pip install ty
+
+    # Via uvx (no installation required)
+    uvx ty --version
+
+    # Verify installation
+    which ty
+    ty --version
+    ```
+
+    <Warning>
+      ty is experimental. It's actively developed by the Astral team but may have incomplete features or bugs.
+    </Warning>
+  </Tab>
+  
+  <Tab title="pyrefly (experimental)">
+    ```bash
+    # Via pip
+    pip install pyrefly
+
+    # Verify installation
+    which pyrefly
+    pyrefly --version
+    ```
+
+    <Warning>
+      pyrefly is experimental. It's developed by Meta but may not support all LSP features.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Selection Methods
+
+### Method 1: Environment Variable (Recommended)
+
+Set `TYPEMUX_CC_BACKEND` in your config file for persistent backend selection.
+
+<Steps>
+  <Step title="Create config file">
+    ```bash
+    mkdir -p ~/.config/typemux-cc
+    cat > ~/.config/typemux-cc/config << 'EOF'
+    export TYPEMUX_CC_BACKEND="pyright"
+    EOF
+    ```
+  </Step>
+
+  <Step title="Choose your backend">
+    Edit `~/.config/typemux-cc/config` and set one of:
+    
+    ```bash
+    export TYPEMUX_CC_BACKEND="pyright"  # Default
+    export TYPEMUX_CC_BACKEND="ty"       # Experimental
+    export TYPEMUX_CC_BACKEND="pyrefly"  # Experimental
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Changes take effect on next Claude Code launch.
+  </Step>
+</Steps>
+
+### Method 2: CLI Flag (Manual Execution)
+
+When running typemux-cc manually (outside Claude Code plugin):
+
+```bash
+# Pyright
+./target/release/typemux-cc --backend pyright
+
+# ty
+./target/release/typemux-cc --backend ty
+
+# pyrefly
+./target/release/typemux-cc --backend pyrefly
+```
+
+### Method 3: One-time Environment Variable
+
+```bash
+# For single session
+TYPEMUX_CC_BACKEND=ty ./target/release/typemux-cc
+```
+
+## How Backend Selection Works
+
+Backend selection is parsed at startup from CLI args or environment:
+
+```rust
+// From src/main.rs:36-44
+#[derive(Parser, Debug)]
+struct Args {
+    /// LSP backend to use: pyright, ty, or pyrefly
+    /// Can also be set via TYPEMUX_CC_BACKEND environment variable
+    #[arg(
+        long,
+        env = "TYPEMUX_CC_BACKEND",
+        default_value = "pyright",
+        value_enum
+    )]
+    backend: BackendKind,
+}
+```
+
+The backend type is stored in proxy state and used for all spawned processes:
+
+```rust
+// From src/backend.rs:78-105
+pub async fn spawn(kind: BackendKind, venv_path: Option<&Path>) -> Result<Self, BackendError> {
+    let mut cmd = Command::new(kind.command());
+    for arg in kind.args() {
+        cmd.arg(arg);
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
+
+    if let Some(venv) = venv_path {
+        kind.apply_env(&mut cmd, venv);
+
+        tracing::info!(
+            backend = kind.display_name(),
+            venv = %venv.display(),
+            path_prefix = %format!("{}/bin", venv.display()),
+            "Spawning backend with venv"
+        );
+    }
+
+    let mut child = cmd.spawn()?;
+    // ...
+}
+```
+
+<Info>
+  All backends in the pool use the **same backend type**. You cannot run pyright and ty simultaneously in the same proxy instance.
+</Info>
+
+## Backend-Specific Features
+
+### pyright
+
+<Card title="Features" icon="circle-check">
+  - Full LSP support (hover, completion, references, rename, etc.)
+  - Fast incremental checking
+  - Extensive type inference
+  - `pyrightconfig.json` / `pyproject.toml` configuration
+  - Workspace symbol search
+</Card>
+
+**Configuration**: pyright reads `pyrightconfig.json` or `[tool.pyright]` in `pyproject.toml` from the workspace root.
+
+```json
+// pyrightconfig.json
+{
+  "include": ["src"],
+  "exclude": ["**/node_modules", "**/__pycache__"],
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": false
+}
+```
+
+### ty
+
+<Card title="Features" icon="flask">
+  - Fast type checking (built in Rust)
+  - Experimental LSP support
+  - Limited hover/completion (as of early 2025)
+  - Good diagnostic performance
+</Card>
+
+**Limitations**:
+- Some LSP features incomplete (references, rename)
+- Configuration options limited compared to pyright
+
+**Known Issues**:
+- Editable installs (setuptools) not supported by **any** LSP backend ([ty#475](https://github.com/astral-sh/ty/issues/475))
+- Use hatchling/flit build backends instead
+
+### pyrefly
+
+<Card title="Features" icon="flask">
+  - Meta's internal type checker
+  - Experimental LSP support
+  - Fast performance on large codebases
+</Card>
+
+**Limitations**:
+- Documentation scarce
+- Limited community support
+- May have incomplete LSP features
+
+## Environment Variables Applied to Backends
+
+All backends receive these environment variables when spawned:
+
+```rust
+// From src/backend.rs:46-53
+pub fn apply_env(&self, cmd: &mut Command, venv: &Path) {
+    let venv_str = venv.to_string_lossy();
+    cmd.env("VIRTUAL_ENV", venv_str.as_ref());
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}/bin:{}", venv_str, current_path);
+    cmd.env("PATH", &new_path);
+}
+```
+
+| Variable | Value | Purpose |
+|----------|-------|--------|
+| `VIRTUAL_ENV` | `/path/to/project/.venv` | Tells backend which venv to use |
+| `PATH` | `/path/to/project/.venv/bin:$PATH` | Prioritizes venv binaries (python, pip) |
+
+<Note>
+  Currently all backends use the same environment setup. The `apply_env` method exists as an extension point for future backend-specific customization.
+</Note>
+
+## Switching Backends
+
+<Steps>
+  <Step title="Update config">
+    ```bash
+    # Edit ~/.config/typemux-cc/config
+    export TYPEMUX_CC_BACKEND="ty"
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Backend selection happens at startup. Restart to apply changes.
+  </Step>
+
+  <Step title="Verify">
+    ```bash
+    tail -f /tmp/typemux-cc.log | grep "backend="
+    ```
+
+    You should see:
+    ```
+    [INFO] Starting LSP proxy backend=ty
+    [INFO] Spawning backend with venv backend=ty venv=/path/to/.venv
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Backend command not found
+
+```bash
+# Check if backend is in PATH
+which pyright-langserver
+which ty
+which pyrefly
+
+# Install if missing (see Installation section)
+```
+
+### Backend fails to spawn
+
+Check logs for spawn errors:
+
+```bash
+tail -100 /tmp/typemux-cc.log | grep -i "error\|failed"
+```
+
+Common causes:
+- Backend not installed
+- Backend binary not executable
+- Missing dependencies (e.g., Node.js for pyright npm install)
+
+### Wrong backend running
+
+Verify config:
+
+```bash
+cat ~/.config/typemux-cc/config | grep TYPEMUX_CC_BACKEND
+```
+
+Check startup logs:
+
+```bash
+grep "Starting LSP proxy" /tmp/typemux-cc.log | tail -1
+```
+
+## Performance Comparison
+
+| Backend | Startup time | Memory usage | Type check speed | LSP completeness |
+|---------|-------------|--------------|-----------------|------------------|
+| pyright | ~1-2s | ~200-500MB | Fast | ✅ Complete |
+| ty | ~500ms-1s | ~100-300MB | Very fast | 🧪 Partial |
+| pyrefly | ~1-2s | ~300-600MB | Fast | 🧪 Partial |
+
+<Tip>
+  **Recommendation**: Stick with **pyright** unless you have specific needs. It has the most complete LSP implementation and is battle-tested in production.
+</Tip>
+
+## Summary
+
+<Card title="Backend selection checklist" icon="list-check">
+  1. Install your preferred backend (`npm install -g pyright` recommended)
+  2. Set `TYPEMUX_CC_BACKEND` in `~/.config/typemux-cc/config`
+  3. Restart Claude Code
+  4. Verify via logs: `tail -f /tmp/typemux-cc.log`
+</Card>

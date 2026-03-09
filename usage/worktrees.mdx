@@ -1,0 +1,392 @@
+---
+title: Git Worktrees
+description: Using typemux-cc with git worktrees and late .venv creation
+---
+
+Git worktrees are common in AI-assisted development workflows. typemux-cc solves the problem of creating `.venv` **after** opening files in a new worktree — no Claude Code restart required.
+
+## The Problem
+
+With Claude Code's official pyright plugin:
+
+1. Create a worktree: `git worktree add ../my-project-worktree feat/new-feature`
+2. Open files in the worktree (no `.venv` exists yet)
+3. Create `.venv`: `cd ../my-project-worktree && uv sync`
+4. **LSP doesn't work** — pyright still thinks there's no venv
+5. **Must restart Claude Code** to pick up the new `.venv`
+
+With typemux-cc, step 5 is eliminated.
+
+## Typical Worktree Workflow
+
+Here's the real-world scenario from the README:
+
+```
+my-project/                    # main worktree
+├── .venv/
+└── src/main.py
+
+my-project-worktree/           # new worktree (no .venv yet)
+└── src/main.py
+```
+
+<Steps>
+  <Step title="Create worktree">
+    ```bash
+    git worktree add ../my-project-worktree feat/new-feature
+    ```
+
+    At this point, `my-project-worktree/` has no `.venv`.
+  </Step>
+
+  <Step title="Open files in Claude Code">
+    Open `my-project-worktree/src/main.py` in Claude Code.
+
+    **What happens**:
+    - typemux-cc searches for `.venv` in parent directories
+    - Finds none (stops at git toplevel)
+    - Caches `venv=None` for this document
+    - LSP requests return errors (strict venv mode)
+
+    ```rust
+    // From src/venv.rs:34-96
+    pub async fn find_venv(
+        file_path: &Path,
+        git_toplevel: Option<&Path>,
+    ) -> Result<Option<PathBuf>, VenvError> {
+        let mut current = file_path.parent();
+
+        while let Some(dir) = current {
+            // Stop if we exceed git toplevel
+            if let Some(toplevel) = git_toplevel {
+                if !dir.starts_with(toplevel) {
+                    break;
+                }
+            }
+
+            // Check for .venv/pyvenv.cfg
+            let venv_path = dir.join(".venv");
+            let pyvenv_cfg = venv_path.join("pyvenv.cfg");
+            if pyvenv_cfg.exists() {
+                return Ok(Some(venv_path));
+            }
+
+            current = dir.parent();
+        }
+
+        Ok(None) // Not found
+    }
+    ```
+  </Step>
+
+  <Step title="Create .venv">
+    ```bash
+    cd my-project-worktree
+    uv sync
+    ```
+
+    Now `.venv` exists:
+    ```
+    my-project-worktree/
+    ├── .venv/
+    │   ├── bin/
+    │   └── pyvenv.cfg  # This is what typemux-cc looks for
+    └── src/main.py
+    ```
+  </Step>
+
+  <Step title="Reopen the file">
+    **Close and reopen** `my-project-worktree/src/main.py`.
+
+    **What happens**:
+    - `textDocument/didOpen` triggers a fresh `.venv` search
+    - typemux-cc finds `my-project-worktree/.venv`
+    - Spawns a new backend with `VIRTUAL_ENV=my-project-worktree/.venv`
+    - Restores the document to the new backend
+    - LSP features now work
+
+    ```rust
+    // From src/proxy/document.rs:65-93
+    pub(crate) async fn handle_did_open(
+        &mut self,
+        msg: &RpcMessage,
+        count: usize,
+        client_writer: &mut LspFrameWriter<tokio::io::Stdout>,
+    ) -> Result<(), ProxyError> {
+        // Search for .venv (fresh search on every didOpen)
+        let found_venv = venv::find_venv(
+            &file_path, 
+            self.state.git_toplevel.as_deref()
+        ).await?;
+
+        // Cache document with new venv
+        if let Some(text_content) = &text {
+            let doc = crate::state::OpenDocument {
+                venv: found_venv.clone(), // New venv path cached
+                // ...
+            };
+            self.state.open_documents.insert(url.clone(), doc);
+        }
+
+        // Spawn backend if not in pool
+        if !self.state.pool.contains(venv_path) {
+            self.create_backend_instance(venv_path, client_writer).await?;
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  **No Claude Code restart required**. The backend pool dynamically adds the new worktree's backend.
+</Info>
+
+## Detection Logic
+
+### Git Toplevel as Search Boundary
+
+typemux-cc caches the git repository root at startup:
+
+```rust
+// From src/proxy/mod.rs:48-49
+pub async fn run(&mut self) -> Result<(), ProxyError> {
+    // Get and cache git toplevel
+    self.state.git_toplevel = venv::get_git_toplevel(&cwd).await?;
+    // ...
+}
+```
+
+The git toplevel is used as a boundary when searching for `.venv`:
+
+```rust
+// From src/venv.rs:8-32
+pub async fn get_git_toplevel(working_dir: &Path) -> Result<Option<PathBuf>, VenvError> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(working_dir)
+        .output()
+        .await?;
+
+    if output.status.success() {
+        let path_str = String::from_utf8_lossy(&output.stdout);
+        let path = PathBuf::from(path_str.trim());
+        Ok(Some(path))
+    } else {
+        Ok(None) // Not in a git repository
+    }
+}
+```
+
+<Card title="Why use git toplevel?" icon="question">
+  **Prevents searching outside the project**. Without a boundary, typemux-cc might find `.venv` from a parent project (e.g., system-wide venv), which would be incorrect.
+</Card>
+
+### Worktree-Specific Behavior
+
+Each worktree is a separate git working directory with its own `.venv`:
+
+```
+~/projects/
+├── my-project/              # Main worktree
+│   ├── .git/               # Git metadata (linked)
+│   ├── .venv/              # venv for main worktree
+│   └── src/main.py
+└── my-project-worktree/     # Separate worktree
+    ├── .git                # Symlink to main .git
+    ├── .venv/              # Independent venv
+    └── src/main.py
+```
+
+When you run `git rev-parse --show-toplevel` in a worktree, it returns the worktree's root (not the main repo root). This ensures `.venv` search is scoped correctly.
+
+## Late .venv Creation Scenario
+
+### Why the Cache Limitation Exists
+
+```rust
+// From src/state.rs:30-37
+pub struct OpenDocument {
+    pub language_id: String,
+    pub version: i32,
+    pub text: String,
+    pub venv: Option<PathBuf>, // Cached on first open
+}
+```
+
+The `venv` field is set **once** when the document is opened. Subsequent LSP requests reuse this cached value without re-searching the filesystem.
+
+**Rationale**: Filesystem I/O (checking for `.venv/pyvenv.cfg`) on every hover/completion request would be prohibitively expensive.
+
+### Workaround: Reopen Files
+
+Closing and reopening a file clears its cache entry:
+
+```rust
+// From src/proxy/document.rs:204-223
+pub(crate) async fn handle_did_close(&mut self, msg: &RpcMessage) {
+    if self.state.open_documents.remove(&url).is_some() {
+        tracing::debug!(
+            uri = %url,
+            remaining_docs = self.state.open_documents.len(),
+            "Document removed from cache"
+        );
+    }
+}
+```
+
+Next `didOpen` triggers a fresh search:
+
+```rust
+// From src/proxy/document.rs:72-73
+// Search for .venv (fresh search on every didOpen)
+let found_venv = venv::find_venv(&file_path, self.state.git_toplevel.as_deref()).await?;
+```
+
+<Warning>
+  If you create `.venv` after opening files, you **must reopen those files** for LSP to work. This is the one manual step required.
+</Warning>
+
+## Real Workflow Example
+
+Here's a complete workflow from a real AI-assisted development session:
+
+<CodeGroup>
+```bash Terminal 1: Create worktree and setup
+# 1. Create worktree
+cd ~/projects/my-project
+git worktree add ../my-project-feat-auth feat/auth
+
+# 2. Switch to worktree
+cd ../my-project-feat-auth
+
+# 3. Create venv
+uv sync
+
+# Verify venv exists
+ls -la .venv/pyvenv.cfg
+```
+
+```bash Terminal 2: Monitor typemux-cc logs
+# Watch backend spawning
+tail -f /tmp/typemux-cc.log | grep -E "venv found|Creating new backend|session="
+```
+</CodeGroup>
+
+**Expected log output**:
+
+```
+[INFO] didOpen received count=1 uri=file:///home/user/projects/my-project-feat-auth/src/main.py
+[WARN] No .venv found file=/home/user/projects/my-project-feat-auth/src/main.py depth=3
+
+# (After uv sync and reopening the file)
+
+[INFO] didOpen received count=2 uri=file:///home/user/projects/my-project-feat-auth/src/main.py
+[INFO] .venv found venv=/home/user/projects/my-project-feat-auth/.venv depth=0
+[INFO] Creating new backend instance session=2 venv=/home/user/projects/my-project-feat-auth/.venv
+[INFO] Spawning backend with venv backend=pyright venv=/home/user/projects/my-project-feat-auth/.venv
+[INFO] Sending initialize to backend venv=/home/user/projects/my-project-feat-auth/.venv
+[INFO] Backend initialized session=2 venv=/home/user/projects/my-project-feat-auth/.venv
+[INFO] Restored document session=2 uri=file:///home/user/projects/my-project-feat-auth/src/main.py
+```
+
+## Multiple Worktrees
+
+You can have multiple worktrees open simultaneously, each with its own `.venv` and backend:
+
+```
+~/projects/
+├── my-project/         # session=1, venv=my-project/.venv
+├── my-project-feat-a/  # session=2, venv=my-project-feat-a/.venv
+└── my-project-feat-b/  # session=3, venv=my-project-feat-b/.venv
+```
+
+**What happens**:
+1. Open file from `my-project/` → backend spawned (session 1)
+2. Open file from `my-project-feat-a/` → new backend spawned (session 2)
+3. Open file from `my-project-feat-b/` → new backend spawned (session 3)
+4. Return to `my-project/` → session 1 still in pool, no restart
+
+All three backends coexist in the pool (up to `TYPEMUX_CC_MAX_BACKENDS`, default 8).
+
+## Troubleshooting
+
+### .venv not detected after creation
+
+<Steps>
+  <Step title="Verify pyvenv.cfg exists">
+    ```bash
+    cat .venv/pyvenv.cfg
+    ```
+
+    If missing, your venv creation failed or used an unsupported tool (poetry/conda).
+  </Step>
+
+  <Step title="Check git toplevel">
+    ```bash
+    git rev-parse --show-toplevel
+    ```
+
+    Should return the worktree root, not the main repo root.
+  </Step>
+
+  <Step title="Reopen files">
+    Close all Python files in the worktree and reopen them. This clears cached `venv=None`.
+  </Step>
+
+  <Step title="Check logs">
+    ```bash
+    grep "venv found\|No .venv found" /tmp/typemux-cc.log | tail -5
+    ```
+  </Step>
+</Steps>
+
+### Still getting "venv not found" errors after reopening
+
+Possible causes:
+
+1. **Symlink .venv**: typemux-cc may not follow symlinks. Use an actual directory.
+2. **Wrong .venv name**: Only `.venv` is supported (not `venv`, `.env`, etc.).
+3. **Missing pyvenv.cfg**: Some tools (conda) don't create this file.
+
+```bash
+# Fix: Create a proper venv
+rm -rf .venv
+python -m venv .venv
+# or
+uv sync
+```
+
+### Worktree uses wrong venv (parent project's venv)
+
+This happens if git toplevel detection fails. Check:
+
+```bash
+cd my-project-worktree
+git rev-parse --show-toplevel
+```
+
+Should return `my-project-worktree`, not `my-project`.
+
+If returning the wrong path, your worktree setup is broken:
+
+```bash
+# Recreate worktree
+cd my-project
+git worktree remove ../my-project-worktree
+git worktree add ../my-project-worktree feat/auth
+```
+
+## Summary
+
+<Card title="Worktree workflow checklist" icon="list-check">
+  1. ✅ Create worktree: `git worktree add ../my-project-feat feat/new`
+  2. ✅ Open files in Claude Code (LSP won't work yet)
+  3. ✅ Create venv: `cd ../my-project-feat && uv sync`
+  4. ✅ Verify pyvenv.cfg: `cat .venv/pyvenv.cfg`
+  5. ✅ **Close and reopen files** in Claude Code
+  6. ✅ LSP features now work — no restart needed
+</Card>
+
+<Tip>
+  **Best practice**: Create `.venv` **before** opening files in Claude Code. This avoids the reopen step entirely.
+</Tip>

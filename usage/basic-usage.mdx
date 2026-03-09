@@ -1,0 +1,344 @@
+---
+title: Basic Usage
+description: How typemux-cc works automatically with Claude Code
+---
+
+typemux-cc runs as a Claude Code plugin and works automatically in the background. You don't need to manually start or configure it for basic operation.
+
+## How It Works
+
+The plugin acts as a **transparent proxy** between Claude Code and your Python type-checking backend (pyright, ty, or pyrefly). It automatically detects `.venv` directories and spawns backend processes as needed.
+
+<Steps>
+  <Step title="Plugin starts with Claude Code">
+    When Claude Code launches, typemux-cc starts automatically. It searches for a fallback `.venv` in:
+    
+    1. Git repository root (if in a git repo)
+    2. Current working directory
+    3. If neither exists, starts with an empty backend pool
+
+    ```rust
+    // From src/venv.rs:99-155
+    pub async fn find_fallback_venv(cwd: &Path) -> Result<Option<PathBuf>, VenvError> {
+        // 1. Get git toplevel
+        let git_toplevel = get_git_toplevel(cwd).await?;
+
+        // 2. Search for .venv from toplevel
+        if let Some(toplevel) = &git_toplevel {
+            let venv_path = toplevel.join(VENV_DIR);
+            let pyvenv_cfg = venv_path.join(PYVENV_CFG);
+            if pyvenv_cfg.exists() {
+                return Ok(Some(venv_path));
+            }
+        }
+
+        // 3. Search for .venv from cwd
+        let venv_path = cwd.join(VENV_DIR);
+        let pyvenv_cfg = venv_path.join(PYVENV_CFG);
+        if pyvenv_cfg.exists() {
+            return Ok(Some(venv_path));
+        }
+
+        Ok(None)
+    }
+    ```
+  </Step>
+
+  <Step title="Opening Python files triggers detection">
+    When you open a Python file, typemux-cc:
+    
+    1. **Searches for `.venv`** by traversing parent directories from the file location
+    2. **Stops at git toplevel** (repository boundary) if in a git repo
+    3. **Verifies** that `.venv/pyvenv.cfg` exists (strict validation)
+    4. **Spawns a backend** if `.venv` is found and not already in the pool
+
+    <CodeGroup>
+    ```rust src/venv.rs:34-96 (Search algorithm)
+    pub async fn find_venv(
+        file_path: &Path,
+        git_toplevel: Option<&Path>,
+    ) -> Result<Option<PathBuf>, VenvError> {
+        // Start from file's parent directory
+        let mut current = file_path.parent();
+        let mut depth = 0;
+
+        while let Some(dir) = current {
+            // Stop if we exceed git toplevel
+            if let Some(toplevel) = git_toplevel {
+                if !dir.starts_with(toplevel) {
+                    break;
+                }
+            }
+
+            // Check for .venv/pyvenv.cfg existence
+            let venv_path = dir.join(VENV_DIR);
+            let pyvenv_cfg = venv_path.join(PYVENV_CFG);
+
+            if pyvenv_cfg.exists() {
+                tracing::info!(
+                    venv = %venv_path.display(),
+                    depth = depth,
+                    ".venv found"
+                );
+                return Ok(Some(venv_path));
+            }
+
+            current = dir.parent();
+            depth += 1;
+        }
+
+        Ok(None)
+    }
+    ```
+
+    ```rust src/proxy/document.rs:65-93 (didOpen handler)
+    // Search for .venv
+    let found_venv = venv::find_venv(
+        &file_path, 
+        self.state.git_toplevel.as_deref()
+    ).await?;
+
+    // Cache document
+    if let Some(text_content) = &text {
+        let doc = crate::state::OpenDocument {
+            language_id: language_id.clone(),
+            version,
+            text: text_content.clone(),
+            venv: found_venv.clone(),
+        };
+        self.state.open_documents.insert(url.clone(), doc);
+    }
+
+    // Ensure backend in pool and forward didOpen
+    if !self.state.pool.contains(venv_path) {
+        if self.state.pool.is_full() {
+            self.evict_lru_backend(client_writer).await?;
+        }
+        self.create_backend_instance(venv_path, client_writer).await?;
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Backend spawns with correct environment">
+    Each backend process spawns with:
+    
+    - `VIRTUAL_ENV` set to the detected `.venv` path
+    - `PATH` prefixed with `.venv/bin`
+    - Unique session ID for tracking
+
+    ```rust
+    // From src/backend.rs:46-53
+    pub fn apply_env(&self, cmd: &mut Command, venv: &Path) {
+        let venv_str = venv.to_string_lossy();
+        cmd.env("VIRTUAL_ENV", venv_str.as_ref());
+
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}/bin:{}", venv_str, current_path);
+        cmd.env("PATH", &new_path);
+    }
+    ```
+
+    <Note>
+    These environment variables are **only set for the backend process**. Your shell environment and system PATH remain unchanged.
+    </Note>
+  </Step>
+</Steps>
+
+## When Backends Are Spawned
+
+Backends spawn automatically in these scenarios:
+
+<Card title="First file open in a project" icon="file">
+  When you open the first Python file from a project (directory with `.venv`), typemux-cc searches for `.venv` and spawns a backend if found.
+</Card>
+
+<Card title="Switching to a different project" icon="arrows-left-right">
+  Opening a file from a project with a different `.venv` path spawns a new backend. The previous backend stays alive in the pool.
+</Card>
+
+<Card title="Late .venv creation" icon="clock">
+  If you create `.venv` after opening files, **reopen the file** to trigger detection. Cached documents don't automatically re-search for `.venv`.
+</Card>
+
+<Warning>
+  If `.venv` doesn't exist when you open a file, typemux-cc caches `venv=None` for that document. Creating `.venv` later won't take effect until you **close and reopen the file**.
+</Warning>
+
+## Document State and Caching
+
+### What Gets Cached
+
+For every opened document, typemux-cc maintains:
+
+```rust
+// From src/state.rs:30-37
+pub struct OpenDocument {
+    pub language_id: String,
+    pub version: i32,
+    pub text: String,
+    pub venv: Option<PathBuf>,
+}
+```
+
+- **URI** (file:// URL)
+- **Language ID** (`python`)
+- **Version number** (incremented on each change)
+- **Full text content** (updated via `textDocument/didChange`)
+- **Associated venv path** (detected on first open)
+
+### Why Caching Matters
+
+<Steps>
+  <Step title="State restoration when backends spawn">
+    When a new backend spawns, it needs to know about already-open files. typemux-cc automatically resends `textDocument/didOpen` for all documents belonging to that `.venv`.
+
+    ```rust
+    // From src/proxy/initialization.rs:179-266
+    pub(crate) async fn restore_documents_to_backend(
+        &self,
+        backend: &mut LspBackend,
+        venv: &Path,
+        session: u64,
+        _client_writer: &mut LspFrameWriter<tokio::io::Stdout>,
+    ) -> Result<(), ProxyError> {
+        for (url, doc) in &self.state.open_documents {
+            // Only restore documents matching this venv
+            let should_restore = doc.venv.as_deref() == Some(venv);
+
+            if !should_restore {
+                skipped += 1;
+                continue;
+            }
+
+            // Resend didOpen with cached text
+            let didopen_msg = RpcMessage {
+                method: Some("textDocument/didOpen".to_string()),
+                params: Some(serde_json::json!({
+                    "textDocument": {
+                        "uri": url.to_string(),
+                        "languageId": doc.language_id,
+                        "version": doc.version,
+                        "text": doc.text,
+                    }
+                })),
+                // ...
+            };
+
+            backend.send_message(&didopen_msg).await?;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Incremental text updates">
+    `textDocument/didChange` events update the cached text immediately, even if no backend is running for that document.
+
+    ```rust
+    // From src/proxy/document.rs:136-201
+    pub(crate) async fn handle_did_change(&mut self, msg: &RpcMessage) {
+        for change in changes_array {
+            if let Some(range) = change.get("range") {
+                // Incremental change (LSP range-based edit)
+                crate::text_edit::apply_incremental_change(
+                    &mut doc.text, 
+                    range, 
+                    new_text
+                )?;
+            } else if let Some(new_text) = change.get("text") {
+                // Full text replacement
+                doc.text = new_text.to_string();
+            }
+        }
+
+        if let Some(v) = version {
+            doc.version = v;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Cache invalidation on close">
+    When you close a file, typemux-cc removes it from the cache.
+
+    ```rust
+    // From src/proxy/document.rs:204-223
+    pub(crate) async fn handle_did_close(&mut self, msg: &RpcMessage) {
+        if self.state.open_documents.remove(&url).is_some() {
+            tracing::debug!(
+                uri = %url,
+                remaining_docs = self.state.open_documents.len(),
+                "Document removed from cache"
+            );
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+### Cache Limitations
+
+<Warning>
+  **Important**: The `.venv` path is cached when a document is first opened. If you:
+  
+  1. Open a file (no `.venv` exists yet)
+  2. Create `.venv` later
+  3. Try to use LSP features
+
+  You'll get errors because the cached `venv=None` is reused. **Solution**: Close and reopen the file to trigger a fresh `.venv` search.
+</Warning>
+
+<Info>
+  **Why this design?** Re-searching for `.venv` on every LSP request would be expensive (filesystem I/O). Caching trades off flexibility for performance. The workaround (reopen files) is simple and rare in practice.
+</Info>
+
+## Verification
+
+To check if typemux-cc is working:
+
+<Steps>
+  <Step title="Enable logging">
+    ```bash
+    mkdir -p ~/.config/typemux-cc
+    cat > ~/.config/typemux-cc/config << 'EOF'
+    export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+    export RUST_LOG="typemux_cc=debug"
+    EOF
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code and open a Python file">
+    Open any Python file in a project with `.venv`.
+  </Step>
+
+  <Step title="Check the log">
+    ```bash
+    tail -f /tmp/typemux-cc.log
+    ```
+
+    You should see:
+    ```
+    [INFO] .venv found venv=/path/to/.venv depth=0
+    [INFO] Creating new backend instance session=1 venv=/path/to/.venv
+    [INFO] Spawning backend with venv backend=pyright venv=/path/to/.venv
+    [INFO] Sending initialize to backend venv=/path/to/.venv
+    [INFO] Received initialize response from backend venv=/path/to/.venv
+    [INFO] Starting document restoration session=1 total_docs=1
+    [INFO] Restored document session=1 uri=file:///path/to/file.py
+    ```
+  </Step>
+</Steps>
+
+## Summary
+
+<Card title="Zero-configuration operation" icon="circle-check">
+  - Plugin starts automatically with Claude Code
+  - Detects `.venv` when you open Python files
+  - Spawns backends as needed
+  - Maintains document state across backend lifecycle
+  - No manual intervention required for basic workflows
+</Card>
+
+<Tip>
+  For advanced scenarios (worktrees, monorepos), see the dedicated guides in this section.
+</Tip>

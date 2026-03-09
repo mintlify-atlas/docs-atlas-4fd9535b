@@ -1,0 +1,548 @@
+---
+title: Local Build
+description: Build and install typemux-cc from source
+---
+
+Build typemux-cc from source using Rust and Cargo. This method is required for:
+- Intel macOS users (prebuilt binaries are arm64 only)
+- Windows users (via WSL2)
+- Offline environments
+- Development and testing
+
+## Prerequisites
+
+### Required Tools
+
+<Steps>
+  <Step title="Install Rust">
+    typemux-cc requires **Rust 1.75 or later**.
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ```
+
+    Verify installation:
+    ```bash
+    rustc --version
+    cargo --version
+    ```
+
+    <Info>
+    The installation script will update your shell profile. Restart your terminal or run:
+    ```bash
+    source $HOME/.cargo/env
+    ```
+    </Info>
+  </Step>
+
+  <Step title="Install Git">
+    Required for cloning the repository.
+
+    <CodeGroup>
+    ```bash macOS
+    # Git is pre-installed on macOS
+    git --version
+    ```
+
+    ```bash Ubuntu/Debian
+    sudo apt-get update
+    sudo apt-get install git
+    ```
+
+    ```bash Fedora/RHEL
+    sudo dnf install git
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install LSP Backend">
+    Install at least one Python type-checker backend:
+
+    <CodeGroup>
+    ```bash pyright (recommended)
+    npm install -g pyright
+    ```
+
+    ```bash ty (experimental)
+    pip install ty
+    ```
+
+    ```bash pyrefly (experimental)
+    pip install pyrefly
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Build from Source
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/K-dash/typemux-cc.git
+cd typemux-cc
+```
+
+### 2. Build Binary
+
+Choose a build type:
+
+<Tabs>
+  <Tab title="Release Build (Recommended)">
+    **Optimized binary for production use:**
+
+    ```bash
+    cargo build --release
+    ```
+
+    Or using the Makefile:
+    ```bash
+    make release
+    ```
+
+    The binary will be at `./target/release/typemux-cc`
+
+    <Info>
+    Release builds are optimized with LTO (Link-Time Optimization) and symbol stripping for smaller binary size.
+    </Info>
+  </Tab>
+
+  <Tab title="Debug Build">
+    **Faster compilation for development:**
+
+    ```bash
+    cargo build
+    ```
+
+    Or using the Makefile:
+    ```bash
+    make build
+    ```
+
+    The binary will be at `./target/debug/typemux-cc`
+
+    <Warning>
+    Debug builds are significantly larger and slower than release builds. Use only for development.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### 3. Test Binary
+
+Run the binary directly to verify it works:
+
+```bash
+# Release build
+./target/release/typemux-cc --version
+
+# Debug build
+./target/debug/typemux-cc --version
+```
+
+<Info>
+**Expected output:** `typemux-cc 0.2.3` (or current version)
+</Info>
+
+## Install as Claude Code Plugin
+
+### Method 1: Install from Local Directory (Recommended)
+
+<Steps>
+  <Step title="Disable Official pyright Plugin">
+    ```bash
+    /plugin disable pyright-lsp@claude-plugins-official
+    ```
+  </Step>
+
+  <Step title="Add Local Marketplace">
+    Point to your local build directory:
+
+    ```bash
+    /plugin marketplace add /path/to/typemux-cc
+    ```
+
+    <Note>
+    Use the absolute path to your cloned repository. Claude Code will use the built binary from `./target/release/` or `./target/debug/`.
+    </Note>
+  </Step>
+
+  <Step title="Install Plugin">
+    ```bash
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Restart Claude Code to load the plugin.
+  </Step>
+</Steps>
+
+### Method 2: Manual Installation
+
+<Steps>
+  <Step title="Create Plugin Directory">
+    ```bash
+    mkdir -p ~/.claude/plugins/typemux-cc/bin
+    ```
+  </Step>
+
+  <Step title="Copy Binary and Files">
+    ```bash
+    # Copy binary
+    cp target/release/typemux-cc ~/.claude/plugins/typemux-cc/bin/
+
+    # Copy wrapper script
+    cp bin/typemux-cc-wrapper.sh ~/.claude/plugins/typemux-cc/bin/
+    chmod +x ~/.claude/plugins/typemux-cc/bin/typemux-cc-wrapper.sh
+
+    # Copy plugin metadata
+    cp -r .claude-plugin ~/.claude/plugins/typemux-cc/
+    ```
+  </Step>
+
+  <Step title="Update Plugin Path">
+    Edit `~/.claude/plugins/typemux-cc/.claude-plugin/plugin.json`:
+
+    ```json
+    {
+      "lspServers": {
+        "typemux-cc": {
+          "command": "${HOME}/.claude/plugins/typemux-cc/bin/typemux-cc-wrapper.sh",
+          "args": []
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Enable Plugin">
+    Add to `~/.claude/settings.json`:
+
+    ```json
+    {
+      "enabledPlugins": {
+        "pyright-lsp@claude-plugins-official": false,
+        "typemux-cc": true
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Restart Claude Code to load the plugin.
+  </Step>
+</Steps>
+
+## Development Setup
+
+For active development on typemux-cc:
+
+### Quality Checks
+
+The Makefile provides targets for all quality checks:
+
+<CodeGroup>
+```bash Format code
+make fmt
+
+# Check formatting (CI mode)
+make fmt-check
+```
+
+```bash Lint with Clippy
+make lint
+```
+
+```bash Run tests
+make test
+```
+
+```bash Run all checks
+make all
+# Equivalent to: fmt + lint + test
+```
+
+```bash CI pipeline
+make ci
+# Equivalent to: fmt-check + lint + test
+```
+</CodeGroup>
+
+### Cargo.toml Configuration
+
+```toml Cargo.toml
+[package]
+name = "typemux-cc"
+version = "0.2.3"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies]
+tokio = { version = "1.43", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lsp-types = "0.97"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+thiserror = "2.0"
+anyhow = "1.0"
+bytes = "1.9"
+url = "2.5"
+clap = { version = "4.5", features = ["derive", "env"] }
+
+[profile.release]
+lto = true
+strip = true
+```
+
+Key features:
+- **LTO (Link-Time Optimization)**: Aggressive optimization for smaller binaries
+- **Symbol stripping**: Removes debug symbols from release builds
+- **clap**: CLI argument parsing with environment variable support
+
+### Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific test
+cargo test test_find_venv
+
+# Run with output
+cargo test -- --nocapture
+
+# Run with debug logging
+RUST_LOG=debug cargo test
+```
+
+### Running Locally
+
+Test the binary without installing:
+
+<CodeGroup>
+```bash Default (stderr logging)
+./target/release/typemux-cc
+```
+
+```bash With file logging
+./target/release/typemux-cc --log-file /tmp/typemux-cc.log
+```
+
+```bash Select backend
+./target/release/typemux-cc --backend ty
+
+# Or via environment variable
+TYPEMUX_CC_BACKEND=ty ./target/release/typemux-cc
+```
+
+```bash Custom pool size
+./target/release/typemux-cc --max-backends 16
+```
+
+```bash Disable TTL eviction
+./target/release/typemux-cc --backend-ttl 0
+```
+</CodeGroup>
+
+### Command-Line Options
+
+All options from `src/main.rs`:
+
+```rust src/main.rs (excerpt)
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Optional path to log file (default: stderr only)
+    #[arg(long, env = "TYPEMUX_CC_LOG_FILE")]
+    log_file: Option<PathBuf>,
+
+    /// Maximum number of concurrent backend processes (default: 8, minimum: 1)
+    #[arg(long, env = "TYPEMUX_CC_MAX_BACKENDS", default_value = "8")]
+    max_backends: u64,
+
+    /// Backend TTL in seconds (default: 1800 = 30 minutes). Set to 0 to disable.
+    #[arg(long, env = "TYPEMUX_CC_BACKEND_TTL", default_value = "1800")]
+    backend_ttl: u64,
+
+    /// LSP backend to use: pyright, ty, or pyrefly
+    #[arg(long, env = "TYPEMUX_CC_BACKEND", default_value = "pyright")]
+    backend: BackendKind,
+}
+```
+
+### Backend Commands
+
+How each backend is spawned (from `src/backend.rs`):
+
+```rust src/backend.rs (excerpt)
+impl BackendKind {
+    fn command(&self) -> &'static str {
+        match self {
+            Self::Pyright => "pyright-langserver",
+            Self::Ty => "ty",
+            Self::Pyrefly => "pyrefly",
+        }
+    }
+
+    fn args(&self) -> &'static [&'static str] {
+        match self {
+            Self::Pyright => &["--stdio"],
+            Self::Ty => &["server"],
+            Self::Pyrefly => &["lsp"],
+        }
+    }
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Rust version too old">
+    **Error:**
+    ```
+    error: package requires rustc 1.75 or newer
+    ```
+
+    **Solution:**
+    ```bash
+    # Update Rust to latest stable
+    rustup update stable
+    
+    # Verify version
+    rustc --version
+    ```
+  </Accordion>
+
+  <Accordion title="Linker errors on Linux">
+    **Error:**
+    ```
+    error: linker `cc` not found
+    ```
+
+    **Solution:**
+    ```bash
+    # Ubuntu/Debian
+    sudo apt-get install build-essential
+    
+    # Fedora/RHEL
+    sudo dnf groupinstall "Development Tools"
+    ```
+  </Accordion>
+
+  <Accordion title="Compilation fails with missing dependencies">
+    **Error:**
+    ```
+    error: failed to resolve patches for `...`
+    ```
+
+    **Solution:**
+    ```bash
+    # Clean and rebuild
+    cargo clean
+    cargo build --release
+    ```
+  </Accordion>
+
+  <Accordion title="Binary runs but LSP doesn't work">
+    **Check:**
+    
+    1. Backend is installed:
+       ```bash
+       which pyright-langserver
+       ```
+    
+    2. Binary has execute permission:
+       ```bash
+       chmod +x ~/.claude/plugins/typemux-cc/bin/typemux-cc
+       ```
+    
+    3. Plugin is enabled in `~/.claude/settings.json`
+    
+    4. Test binary directly:
+       ```bash
+       ./target/release/typemux-cc --version
+       ```
+  </Accordion>
+
+  <Accordion title="Tests fail">
+    **Common causes:**
+    
+    - Git not installed (required for venv tests)
+    - Temporary directory permissions
+    - Tokio runtime issues
+    
+    **Solution:**
+    ```bash
+    # Run tests with verbose output
+    cargo test -- --nocapture
+    
+    # Skip specific tests
+    cargo test --exclude-test test_name
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Continuous Integration
+
+The CI pipeline runs on GitHub Actions:
+
+```yaml .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: Makefile CI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: make ci
+```
+
+The pipeline ensures:
+- ✅ Code formatting (`cargo fmt --check`)
+- ✅ No clippy warnings (`cargo clippy -- -D warnings`)
+- ✅ All tests pass (`cargo test`)
+- ✅ Cross-platform compatibility (Linux, macOS, arm64)
+
+## Update Local Build
+
+To update your local build to the latest version:
+
+```bash
+cd /path/to/typemux-cc
+
+# Pull latest changes
+git pull origin main
+
+# Rebuild
+cargo build --release
+
+# Reinstall (if using Method 1)
+/plugin update typemux-cc@typemux-cc-marketplace
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Configure backend selection and logging
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/advanced/architecture">
+    Learn about the codebase architecture
+  </Card>
+</CardGroup>

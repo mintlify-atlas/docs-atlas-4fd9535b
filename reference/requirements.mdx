@@ -1,0 +1,202 @@
+---
+title: 'Requirements'
+description: 'System requirements and prerequisites for typemux-cc'
+---
+
+## Supported Operating Systems
+
+typemux-cc supports Unix-like systems with specific architecture requirements.
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| **macOS** | arm64 (Apple Silicon) | ✅ Supported |
+| **macOS** | x86_64 (Intel) | ⚠️ Build from source required |
+| **Linux** | x86_64 | ✅ Supported |
+| **Linux** | arm64 | ✅ Supported |
+| **Windows** | Any | ❌ Unsupported |
+
+<Warning>
+Windows is currently unsupported due to path handling differences. WSL2 is recommended for Windows users.
+</Warning>
+
+<Info>
+Intel macOS users can still use typemux-cc by building from source. Prebuilt binaries are arm64 only.
+</Info>
+
+## Prerequisites
+
+### Required
+
+#### 1. LSP Backend
+
+At least one of the following LSP backends must be installed and available in PATH:
+
+<Note>
+Install pyright if unsure which backend to choose. It's the default and most stable option.
+</Note>
+
+**Pyright** (recommended):
+```bash
+npm install -g pyright
+# or
+pip install pyright
+```
+
+**ty** (experimental):
+```bash
+pip install ty
+# or
+uvx ty
+```
+
+**pyrefly** (experimental):
+```bash
+pip install pyrefly
+```
+
+Verify installation:
+```bash
+which pyright-langserver  # for pyright
+which ty                  # for ty
+which pyrefly            # for pyrefly
+```
+
+#### 2. Git (Optional but Recommended)
+
+Git is used to determine the `.venv` search boundary in repositories. typemux-cc works without it, but venv detection may be less accurate.
+
+```bash
+# Check if git is installed
+which git
+```
+
+### For Building from Source
+
+If you need to build from source (e.g., Intel macOS users), you'll need:
+
+- **Rust 1.75 or later**: Install from [rustup.rs](https://rustup.rs)
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Verify installation
+rustc --version  # Should show 1.75 or higher
+```
+
+## Minimum Versions
+
+| Component | Minimum Version | Recommended |
+|-----------|----------------|-------------|
+| **Rust** (for building) | 1.75+ | Latest stable |
+| **pyright** | Any | Latest |
+| **ty** | Any | Latest |
+| **pyrefly** | Any | Latest |
+| **Git** | Any | 2.x+ |
+
+<Info>
+There are no strict minimum versions for LSP backends. However, newer versions typically have better type checking and bug fixes.
+</Info>
+
+## Why Certain Platforms Aren't Supported
+
+### Windows
+
+Windows is currently unsupported due to:
+
+- **Path handling differences**: Unix-like path assumptions (forward slashes, POSIX semantics)
+- **Environment variable handling**: Different conventions for PATH and VIRTUAL_ENV
+- **Process spawning**: Unix-specific process management
+
+**Workaround**: Use WSL2 (Windows Subsystem for Linux 2), which provides a full Linux environment and is fully supported.
+
+```bash
+# Install WSL2 and use typemux-cc inside it
+wsl --install
+```
+
+### Intel macOS
+
+Intel macOS is supported, but prebuilt binaries are not provided because:
+
+- **Limited demand**: Most macOS users have transitioned to Apple Silicon
+- **Build infrastructure**: GitHub Actions runners for Intel macOS are more expensive
+- **Rust support**: arm64 is the primary target for macOS in the Rust ecosystem
+
+**Workaround**: Build from source. It only takes a few minutes:
+
+```bash
+git clone https://github.com/K-dash/typemux-cc.git
+cd typemux-cc
+cargo build --release
+
+# Then install as a local plugin
+/plugin marketplace add /path/to/typemux-cc
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+## Virtual Environment Requirements
+
+typemux-cc has strict requirements for virtual environment detection:
+
+<Warning>
+Only `.venv` directories with a `pyvenv.cfg` file are recognized. This is intentional to avoid silently using the wrong environment.
+</Warning>
+
+### Supported
+
+- ✅ `.venv` created with `python -m venv`
+- ✅ `.venv` created with `uv venv`
+- ✅ `.venv` created with `virtualenv` (if it creates `pyvenv.cfg`)
+
+### Unsupported
+
+- ❌ Poetry environments (uses different directory structure)
+- ❌ Conda environments (not a venv)
+- ❌ Custom virtual environment names (e.g., `venv`, `env`, `.virtualenv`)
+- ❌ Virtual environments without `pyvenv.cfg`
+
+**Why so strict?** Running an LSP with the wrong environment gives silently wrong results. typemux-cc intentionally fails loudly rather than guessing, following the principle: *"A silently lying LSP is the worst."*
+
+### Workaround for Non-Standard Environments
+
+If you must use a non-standard environment, create a `.venv` symlink:
+
+```bash
+# If you have a venv named 'env'
+ln -s env .venv
+```
+
+<Warning>
+Symlinks may fail to detect `pyvenv.cfg`. If venv detection fails, use an actual `.venv` directory instead.
+</Warning>
+
+## Runtime Dependencies
+
+typemux-cc has **no runtime dependencies** beyond:
+
+1. A supported LSP backend in PATH
+2. Standard system libraries (libc, etc.)
+
+The binary is statically linked and self-contained.
+
+## Verification Checklist
+
+Before using typemux-cc, verify:
+
+```bash
+# 1. Check OS and architecture
+uname -s  # Should show: Darwin (macOS) or Linux
+uname -m  # Should show: arm64, x86_64, or aarch64
+
+# 2. Check LSP backend
+which pyright-langserver  # or 'ty' or 'pyrefly'
+
+# 3. Check git (optional)
+which git
+
+# 4. Check .venv structure (in your project)
+ls -la .venv/pyvenv.cfg
+```
+
+If all checks pass, you're ready to install typemux-cc!

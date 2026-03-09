@@ -1,0 +1,173 @@
+---
+title: Introduction
+description: Learn what typemux-cc is, why it exists, and how it solves Python LSP challenges in Claude Code
+---
+
+## What is typemux-cc?
+
+typemux-cc is a Python type-checker LSP multiplexer designed specifically for Claude Code. It acts as an intelligent proxy between Claude Code and Python LSP backends (pyright, ty, or pyrefly), automatically detecting and managing virtual environments without requiring restarts.
+
+Think of it as a smart traffic controller that routes LSP requests to the right backend based on which `.venv` your files belong to.
+
+## The Problem
+
+Claude Code's official pyright plugin has a fundamental limitation: it spawns a single LSP backend at startup and holds onto it. This creates several painful scenarios:
+
+### Late `.venv` Creation
+
+If you create a virtual environment after starting Claude Code, the LSP backend never picks it up. You're forced to restart Claude Code just to get type-checking.
+
+```bash
+# Common workflow that breaks with official plugin:
+git worktree add ../my-project-worktree feat/new-feature
+cd ../my-project-worktree
+uv sync  # Creates .venv
+# 🔴 LSP still doesn't see the new .venv - must restart Claude Code
+```
+
+This is especially painful with **git worktrees**, which are increasingly common in AI-assisted development workflows.
+
+### Monorepo Project Switching
+
+In monorepos with multiple Python projects, each project typically has its own `.venv` with different dependencies:
+
+```
+my-monorepo/
+├── project-a/.venv/  # Uses Django 4.x
+├── project-b/.venv/  # Uses FastAPI
+└── project-c/.venv/  # Uses Flask
+```
+
+With the official plugin, switching between projects gives you the wrong type information because the LSP backend is locked to whichever `.venv` existed at startup.
+
+### Backend Lock-in
+
+You're locked into pyright. Want to try ty (by the creators of uv) or pyrefly (by Meta)? You can't without modifying plugin configurations.
+
+## How typemux-cc Solves This
+
+typemux-cc addresses these problems through three core innovations:
+
+<CardGroup cols={3}>
+  <Card title="Dynamic .venv Detection" icon="magnifying-glass">
+    Automatically detects `.venv` changes on file open. Create a new virtual environment and typemux-cc picks it up immediately — no restart required.
+  </Card>
+  <Card title="Multi-Backend Pool" icon="database">
+    Maintains a pool of concurrent backend processes, one per `.venv`. Switching between monorepo projects is instant with zero restart overhead.
+  </Card>
+  <Card title="Backend Flexibility" icon="code-branch">
+    Choose between pyright, ty, or pyrefly with a single environment variable. Switch backends without reconfiguring plugins.
+  </Card>
+</CardGroup>
+
+## Architecture Concept
+
+At a high level, typemux-cc works like this:
+
+```
+Claude Code (LSP Client)
+         |
+         | JSON-RPC over stdio
+         |
+    typemux-cc (Proxy)
+         |
+         +-- Backend 1 (VIRTUAL_ENV=project-a/.venv)
+         |
+         +-- Backend 2 (VIRTUAL_ENV=project-b/.venv)
+         |
+         +-- Backend 3 (VIRTUAL_ENV=project-c/.venv)
+```
+
+When you open a file:
+
+<Steps>
+  <Step title="Detect .venv">
+    typemux-cc searches upward from the file's directory to find the nearest `.venv/pyvenv.cfg`
+  </Step>
+  <Step title="Check backend pool">
+    If a backend for that `.venv` already exists in the pool, route requests to it
+  </Step>
+  <Step title="Spawn new backend (if needed)">
+    If no backend exists, spawn a new LSP backend process with `VIRTUAL_ENV` set to the detected `.venv`
+  </Step>
+  <Step title="Route requests">
+    All LSP requests for that file (hover, completion, definition, references) are routed to the correct backend
+  </Step>
+</Steps>
+
+The proxy maintains this pool of backends and routes messages based on which `.venv` each document belongs to. Backends are evicted using LRU (least recently used) policy when the pool is full, or after an idle timeout (default: 30 minutes).
+
+## Key Design Principles
+
+### "A Silently Lying LSP Is the Worst"
+
+Running with the wrong `.venv` is worse than disabling LSP functionality. Why?
+
+- Offering completions with wrong dependencies generates code that imports non-existent modules
+- Type checking appears to pass, but fails at runtime
+- Developers continue coding based on false information
+
+typemux-cc follows a **strict venv mode**: when no `.venv` is found, it returns explicit errors rather than guessing or falling back silently. An explicit error is healthier than silent wrong results.
+
+### LSP Over Text Search
+
+In monorepos, text-based tools like grep return false positives from same-named types across projects. LSP resolves references at the type-system level, providing accurate navigation that respects Python's import semantics.
+
+<Info>
+For real-world benchmarks comparing LSP accuracy vs text search in monorepos, see the [why-lsp.md](https://github.com/K-dash/typemux-cc/blob/main/docs/why-lsp.md) document in the repository.
+</Info>
+
+### No Implicit Fallbacks
+
+The codebase follows a strict no-fallback philosophy: never add silent fallback logic that masks errors. Let it fail loudly so unintended behavior is caught early.
+
+This principle appears throughout the source code:
+
+```rust src/venv.rs
+// From src/venv.rs - explicit None when .venv not found
+if pyvenv_cfg.exists() {
+    tracing::info!(
+        venv = %venv_path.display(),
+        depth = depth,
+        ".venv found"
+    );
+    return Ok(Some(venv_path));
+}
+
+tracing::warn!(
+    file = %file_path.display(),
+    depth = depth,
+    "No .venv found"
+);
+Ok(None)  // Explicit None, not a default fallback
+```
+
+## When Should You Use typemux-cc?
+
+typemux-cc is designed for:
+
+- **Git worktree workflows**: You create worktrees and `.venv` on the fly
+- **Monorepo development**: Multiple Python projects with different virtual environments
+- **Backend experimentation**: You want to try ty or pyrefly instead of pyright
+- **AI-assisted development**: Where `.venv` creation often happens mid-session
+
+<Warning>
+If you're working on a single project with a static `.venv` that never changes, the official pyright plugin may be simpler. typemux-cc shines when virtual environments are dynamic.
+</Warning>
+
+## What's Next?
+
+Ready to get started? The quickstart guide will walk you through installation and verification in under 5 minutes.
+
+<Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+  Install typemux-cc and verify it works with your first `.venv`
+</Card>
+
+<CardGroup cols={2}>
+  <Card title="Supported Backends" icon="layer-group" href="/reference/supported-backends">
+    Learn about pyright, ty, and pyrefly support
+  </Card>
+  <Card title="Architecture Details" icon="sitemap" href="/advanced/architecture">
+    Deep dive into how typemux-cc works internally
+  </Card>
+</CardGroup>

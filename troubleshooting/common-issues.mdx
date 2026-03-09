@@ -1,0 +1,251 @@
+---
+title: "Common Issues"
+description: "Solutions for common typemux-cc problems and error messages"
+---
+
+## LSP Not Working
+
+If type-checking is not working in Claude Code, follow these diagnostic steps:
+
+<Accordion title="Backend Not in PATH">
+
+The most common issue is that the LSP backend executable is not available in your PATH.
+
+**Check if backend is installed:**
+
+```bash
+# For pyright (default backend)
+which pyright-langserver
+
+# For ty
+which ty
+
+# For pyrefly
+which pyrefly
+```
+
+If the command returns nothing, install the backend:
+
+```bash
+# pyright (recommended)
+npm install -g pyright
+
+# ty (experimental)
+pip install ty
+
+# pyrefly (experimental)
+pip install pyrefly
+```
+
+</Accordion>
+
+<Accordion title="Plugin Settings Check">
+
+Verify that typemux-cc is enabled and the official pyright plugin is disabled.
+
+**Check plugin configuration:**
+
+```bash
+cat ~/.claude/settings.json | grep typemux
+```
+
+Your settings should look like this:
+
+```json
+{
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": false,
+    "typemux-cc@typemux-cc-marketplace": true
+  }
+}
+```
+
+<Warning>
+Having both the official pyright plugin and typemux-cc enabled will cause conflicts.
+</Warning>
+
+</Accordion>
+
+## Enabling File Logging
+
+By default, typemux-cc logs to stderr. For persistent logging, enable file output:
+
+<Steps>
+
+<Step title="Create config directory">
+
+```bash
+mkdir -p ~/.config/typemux-cc
+```
+
+</Step>
+
+<Step title="Add log file configuration">
+
+```bash
+cat > ~/.config/typemux-cc/config << 'EOF'
+# Enable file output
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+EOF
+```
+
+</Step>
+
+<Step title="Restart Claude Code">
+
+Restart Claude Code for the configuration to take effect.
+
+</Step>
+
+</Steps>
+
+<Info>
+File logging is essential for troubleshooting. Enable it first before investigating issues.
+</Info>
+
+## Checking Logs
+
+Once file logging is enabled, you can inspect the logs:
+
+```bash
+# View last 100 log lines
+tail -100 /tmp/typemux-cc.log
+
+# Follow logs in real-time
+tail -f /tmp/typemux-cc.log
+
+# Search for errors
+grep -i error /tmp/typemux-cc.log
+```
+
+### Log Levels
+
+Control log verbosity with the `RUST_LOG` environment variable:
+
+```bash
+# Add to ~/.config/typemux-cc/config
+export RUST_LOG="typemux_cc=debug"  # Default
+export RUST_LOG="typemux_cc=trace"  # Detailed (for debugging)
+export RUST_LOG="typemux_cc=info"   # Minimal
+```
+
+<Tip>
+Use `RUST_LOG=trace` when debugging venv detection issues or backend startup failures.
+</Tip>
+
+## Common Error Messages
+
+<Accordion title="Backend process failed to start">
+
+**Symptom:** LSP features not working, log shows backend spawn failure.
+
+**Causes:**
+- Backend executable not in PATH
+- Backend installed in a virtualenv that's not active
+- Permission issues
+
+**Solution:**
+
+```bash
+# Verify backend is globally accessible
+which pyright-langserver
+
+# If using npm-installed pyright, ensure npm bin is in PATH
+echo $PATH | grep npm
+
+# If not, add to your shell profile:
+export PATH="$PATH:$(npm bin -g)"
+```
+
+</Accordion>
+
+<Accordion title="venv_path=None in logs">
+
+**Symptom:** Type-checking not using your project's dependencies.
+
+**Cause:** The file was opened before `.venv` was created, so typemux-cc cached `None` for that document.
+
+**Solution:** Reopen the file after creating `.venv`. See [.venv Not Switching](/troubleshooting/venv-not-switching) for details.
+
+</Accordion>
+
+<Accordion title="Cannot find module 'X' (but it's installed in .venv)">
+
+**Symptom:** Import errors for packages that exist in your `.venv`.
+
+**Possible causes:**
+1. Backend is using wrong `.venv` or no `.venv`
+2. File is outside git repository boundary
+3. Using setuptools editable install
+
+**Solutions:**
+
+```bash
+# 1. Check if .venv/pyvenv.cfg exists
+ls .venv/pyvenv.cfg
+
+# 2. Verify file is in a git repo
+git rev-parse --show-toplevel
+
+# 3. Reopen the file to trigger venv re-detection
+```
+
+<Note>
+All LSP backends (pyright, ty, pyrefly) cannot resolve imports from setuptools-style editable installs. Switch to hatchling/flit or add source paths to backend config.
+</Note>
+
+</Accordion>
+
+<Accordion title="Multiple .venv detected, using X">
+
+**Symptom:** Warning in logs about multiple `.venv` directories.
+
+**Behavior:** typemux-cc searches upward from the file and stops at the git repository root. If multiple `.venv` directories exist at different levels, it uses the closest one.
+
+**Example:**
+
+```
+my-monorepo/          # git root
+├── .venv/            # Found second
+└── project-a/
+    ├── .venv/        # Used (closest to file)
+    └── src/main.py   # Current file
+```
+
+<Info>
+This is expected behavior in monorepos. Each project's `.venv` is isolated and typemux-cc routes requests accordingly.
+</Info>
+
+</Accordion>
+
+## Configuration Reference
+
+All configuration is done via environment variables in `~/.config/typemux-cc/config`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TYPEMUX_CC_BACKEND` | LSP backend to use (`pyright`, `ty`, `pyrefly`) | `pyright` |
+| `TYPEMUX_CC_LOG_FILE` | Log file path (stderr if not set) | Not set |
+| `TYPEMUX_CC_MAX_BACKENDS` | Max concurrent backend processes | `8` |
+| `TYPEMUX_CC_BACKEND_TTL` | Backend TTL in seconds (0 = disabled) | `1800` |
+| `RUST_LOG` | Log level (`info`, `debug`, `trace`) | `typemux_cc=debug` |
+
+<Warning>
+Restart Claude Code after changing configuration for settings to take effect.
+</Warning>
+
+## Still Having Issues?
+
+If none of the above solutions work:
+
+1. **Enable trace logging:**
+   ```bash
+   echo 'export RUST_LOG="typemux_cc=trace"' >> ~/.config/typemux-cc/config
+   ```
+
+2. **Restart Claude Code** and reproduce the issue
+
+3. **Share the logs** when reporting the issue:
+   ```bash
+   tail -200 /tmp/typemux-cc.log
+   ```

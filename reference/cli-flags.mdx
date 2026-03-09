@@ -1,0 +1,144 @@
+---
+title: CLI Flags
+description: Complete reference for all typemux-cc command-line flags
+---
+
+All CLI flags can be set via environment variables. CLI flags take precedence over environment variables.
+
+## Core Flags
+
+<ParamField path="--log-file" type="path" optional>
+  Path to log file for debug output.
+  
+  When specified, logs are written to both stderr (default) and the specified file.
+  
+  **Environment variable**: `TYPEMUX_CC_LOG_FILE`
+  
+  **Default**: Not set (stderr only)
+  
+  **Example**:
+  ```bash
+  typemux-cc --log-file /tmp/typemux-cc.log
+  ```
+</ParamField>
+
+<ParamField path="--max-backends" type="integer" default="8">
+  Maximum number of concurrent LSP backend processes.
+  
+  The proxy maintains a pool of backends (one per `.venv`). When the pool reaches this limit, the least recently used backend is evicted to make room for new ones.
+  
+  **Environment variable**: `TYPEMUX_CC_MAX_BACKENDS`
+  
+  **Valid range**: Minimum 1, no upper limit
+  
+  **Default**: `8`
+  
+  **Example**:
+  ```bash
+  # Allow up to 16 concurrent backends for large monorepos
+  typemux-cc --max-backends 16
+  ```
+</ParamField>
+
+<ParamField path="--backend-ttl" type="integer" default="1800">
+  Backend time-to-live (TTL) in seconds.
+  
+  Idle backends are automatically evicted after this timeout to free memory. Set to `0` to disable TTL eviction (backends only evicted via LRU when pool is full).
+  
+  **Environment variable**: `TYPEMUX_CC_BACKEND_TTL`
+  
+  **Default**: `1800` (30 minutes)
+  
+  **Example**:
+  ```bash
+  # Keep backends alive for 1 hour
+  typemux-cc --backend-ttl 3600
+  
+  # Disable TTL eviction entirely
+  typemux-cc --backend-ttl 0
+  ```
+</ParamField>
+
+<ParamField path="--backend" type="enum" default="pyright">
+  LSP backend type to use for Python type checking.
+  
+  **Environment variable**: `TYPEMUX_CC_BACKEND`
+  
+  **Valid values**:
+  - `pyright` - Microsoft's Pyright type checker (default)
+  - `ty` - Google's ty type checker
+  - `pyrefly` - Astral's pyrefly type checker
+  
+  **Default**: `pyright`
+  
+  **Example**:
+  ```bash
+  # Use ty instead of pyright
+  typemux-cc --backend ty
+  ```
+</ParamField>
+
+## Usage Examples
+
+### Basic Usage
+
+```bash
+# Run with defaults (pyright, 8 max backends, 30min TTL)
+typemux-cc
+```
+
+### Enable Logging
+
+```bash
+# Log to file for debugging
+typemux-cc --log-file /tmp/typemux-cc.log
+```
+
+### Large Monorepo Configuration
+
+```bash
+# More backends, longer TTL, with logging
+typemux-cc \
+  --max-backends 20 \
+  --backend-ttl 7200 \
+  --log-file /var/log/typemux-cc.log
+```
+
+### Use Alternative Backend
+
+```bash
+# Use ty backend instead of pyright
+typemux-cc --backend ty
+```
+
+### Combine Multiple Flags
+
+```bash
+# Complete configuration example
+typemux-cc \
+  --backend ty \
+  --max-backends 12 \
+  --backend-ttl 3600 \
+  --log-file ~/.local/state/typemux-cc.log
+```
+
+## Flag Precedence
+
+When both CLI flags and environment variables are set:
+
+1. **CLI flags take precedence** over environment variables
+2. **Environment variables** are used if no CLI flag is provided
+3. **Default values** are used if neither is set
+
+**Example**:
+```bash
+# CLI flag wins (uses ty, not pyright)
+export TYPEMUX_CC_BACKEND=pyright
+typemux-cc --backend ty  # Uses ty
+```
+
+## See Also
+
+- [Environment Variables](/reference/environment-variables) - Alternative configuration method
+- [Configuration](/configuration/environment-variables) - Detailed configuration strategies
+- [Architecture](/advanced/architecture) - Backend pool management details

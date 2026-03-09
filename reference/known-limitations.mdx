@@ -1,0 +1,303 @@
+---
+title: 'Known Limitations'
+description: 'Current limitations and workarounds for typemux-cc'
+---
+
+## Overview
+
+typemux-cc has several known limitations, most of which have practical workarounds. These limitations are often intentional design decisions to prevent silent failures.
+
+## Summary Table
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| Windows unsupported | Cannot run on native Windows | Use WSL2 |
+| macOS Intel unsupported | No prebuilt binaries | Build from source |
+| Fixed venv name (`.venv` only) | Only detects `.venv` directories | Rename to `.venv` or create symlink |
+| Symlinks may fail | Cannot detect `pyvenv.cfg` through symlinks | Use actual `.venv` directory |
+| Late `.venv` creation | Cached as `None` if created after file open | Reopen file after creating `.venv` |
+| setuptools editable installs | Import resolution fails | Switch to hatchling/flit or configure `extra-paths` |
+
+## Detailed Limitations
+
+### Windows Unsupported
+
+<Warning>
+typemux-cc does not run on native Windows due to path handling differences.
+</Warning>
+
+**Issue**: 
+- Unix-like path assumptions (forward slashes, POSIX semantics)
+- Different environment variable conventions
+- Process spawning differences
+
+**Workaround**:
+```bash
+# Use WSL2 (Windows Subsystem for Linux)
+wsl --install
+
+# Install typemux-cc inside WSL2
+# It will work exactly like on native Linux
+```
+
+WSL2 provides a full Linux environment and is fully supported by typemux-cc.
+
+---
+
+### macOS Intel Unsupported (Prebuilt Binaries)
+
+<Info>
+Intel macOS is supported when building from source. Only prebuilt binaries are arm64-only.
+</Info>
+
+**Issue**: 
+- Prebuilt binaries target arm64 (Apple Silicon) only
+- Limited demand for Intel builds
+- Build infrastructure costs
+
+**Workaround**:
+```bash
+# Build from source (requires Rust 1.75+)
+git clone https://github.com/K-dash/typemux-cc.git
+cd typemux-cc
+cargo build --release
+
+# Install as local plugin
+/plugin marketplace add /path/to/typemux-cc
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+Building takes only a few minutes on modern hardware.
+
+---
+
+### Fixed Virtual Environment Name
+
+<Warning>
+typemux-cc ONLY recognizes directories named `.venv` that contain a `pyvenv.cfg` file.
+</Warning>
+
+**Issue**: 
+- Poetry, conda, and custom-named environments are not detected
+- This is intentional: prevents silently using the wrong environment
+- Design philosophy: "A silently lying LSP is the worst"
+
+**Supported**:
+- ✅ `.venv` created with `python -m venv`
+- ✅ `.venv` created with `uv venv`
+- ✅ `.venv` created with `virtualenv`
+
+**Not Supported**:
+- ❌ `venv`, `env`, `.virtualenv` (wrong name)
+- ❌ Poetry environments (different structure)
+- ❌ Conda environments (not a venv)
+
+**Workaround**:
+```bash
+# Option 1: Rename your venv
+mv venv .venv
+
+# Option 2: Create a symlink (may have issues - see next section)
+ln -s my-custom-venv .venv
+
+# Option 3: Create a new .venv
+python -m venv .venv
+# or
+uv venv
+```
+
+<Note>
+The strict `.venv` requirement prevents accidentally using a wrong or stale environment, which would cause LSP to return incorrect type information.
+</Note>
+
+---
+
+### Symlinks May Fail
+
+**Issue**: 
+- If `.venv` is a symlink, typemux-cc may fail to detect `pyvenv.cfg`
+- Symlink traversal behavior varies by OS
+
+**Affected Scenarios**:
+```bash
+# This may not work reliably
+ln -s /path/to/actual-venv .venv
+```
+
+**Workaround**:
+```bash
+# Don't use symlinks - copy or create actual .venv
+python -m venv .venv
+# or
+cp -r /path/to/actual-venv .venv
+```
+
+<Warning>
+If you must use a symlink and venv detection fails, create an actual `.venv` directory instead.
+</Warning>
+
+---
+
+### Late `.venv` Creation Cache Behavior
+
+<Info>
+This is the most common issue in git worktree workflows.
+</Info>
+
+**Issue**: 
+- typemux-cc caches the venv path on first file open
+- If `.venv` doesn't exist yet, it caches `None`
+- Subsequent requests use the cached value without re-searching
+
+**Scenario**:
+```bash
+# 1. Create worktree (no .venv yet)
+git worktree add ../my-project-worktree feat/new-feature
+
+# 2. Open file in Claude Code
+# -> typemux-cc caches venv=None for this document
+
+# 3. Create .venv
+cd ../my-project-worktree
+uv sync
+
+# 4. LSP still doesn't work (cached as None)
+```
+
+**Why This Happens**:
+
+When a file is first opened, typemux-cc searches for `.venv` and caches the result. If `.venv` doesn't exist, it caches `None`. Later requests reuse this cached value for performance, so creating `.venv` afterwards won't trigger a new search.
+
+**Workaround**:
+```bash
+# After creating .venv, reopen the file in Claude Code
+# This clears the cache and triggers a fresh venv search
+```
+
+**Verification**:
+```bash
+# Check logs for venv_path=None
+RUST_LOG=trace TYPEMUX_CC_LOG_FILE=/tmp/typemux-cc.log
+
+# Look for:
+# venv_path=None
+```
+
+<Note>
+Reopening the file is a one-time action per document. After the first reopen, the correct `.venv` will be cached.
+</Note>
+
+---
+
+### Setuptools Editable Installs
+
+<Warning>
+This is NOT a typemux-cc bug. All Python LSP backends (pyright, ty, pyrefly) have this limitation.
+</Warning>
+
+**Issue**: 
+- Setuptools-style editable installs use import hooks at runtime
+- LSP backends perform static analysis and cannot execute import hooks
+- Result: imports from editable packages fail to resolve
+
+**Affected**:
+```bash
+# This type of editable install won't work with LSP
+pip install -e .  # if using setuptools
+```
+
+**Root Cause**:
+
+Setuptools editable installs create a `.pth` file that registers an import hook. This hook runs at Python runtime to redirect imports. LSP backends analyze code statically (without running Python), so they cannot execute these hooks.
+
+This affects:
+- pyright ([microsoft/pyright#5471](https://github.com/microsoft/pyright/issues/5471))
+- ty ([astral-sh/ty#475](https://github.com/astral-sh/ty/issues/475))
+- pyrefly (same underlying issue)
+
+**Workaround 1**: Switch to modern build backend
+
+```toml
+# pyproject.toml
+[build-system]
+requires = ["hatchling"]  # or "flit_core"
+build-backend = "hatchling.build"  # or "flit_core.buildapi"
+```
+
+Modern build backends (hatchling, flit, pdm) create proper `.pth` files that LSP can resolve.
+
+**Workaround 2**: Configure backend `extra-paths`
+
+**For pyright**, add to `pyrightconfig.json` or `pyproject.toml`:
+```json
+{
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["src"]
+    }
+  ]
+}
+```
+
+**For ty**, add to `pyproject.toml`:
+```toml
+[tool.ty]
+extra-paths = ["src"]
+```
+
+**For pyrefly**, consult pyrefly documentation for path configuration.
+
+<Note>
+This issue is fundamental to how setuptools editable installs work. It's not specific to typemux-cc.
+</Note>
+
+---
+
+## Debugging Tips
+
+### Enable Detailed Logging
+
+```bash
+# Set log file and trace level
+export TYPEMUX_CC_LOG_FILE=/tmp/typemux-cc.log
+export RUST_LOG=trace
+
+# Then check logs
+tail -f /tmp/typemux-cc.log
+```
+
+### Check Current Configuration
+
+```bash
+# Verify backend
+echo $TYPEMUX_CC_BACKEND
+
+# Check if backend is in PATH
+which pyright-langserver  # or ty/pyrefly
+
+# Verify .venv structure
+ls -la .venv/pyvenv.cfg
+```
+
+### Verify Plugin Installation
+
+```bash
+# Check Claude Code settings
+cat ~/.claude/settings.json | grep typemux
+
+# Should show:
+# "typemux-cc@typemux-cc-marketplace": true
+```
+
+## Feature Requests & Bug Reports
+
+If you encounter limitations not listed here, please:
+
+1. Check the [GitHub Issues](https://github.com/K-dash/typemux-cc/issues)
+2. Enable trace logging and gather logs
+3. Open a new issue with details
+
+<Info>
+Some limitations are intentional design decisions (like strict `.venv` naming) to prevent silent failures. These are unlikely to change.
+</Info>

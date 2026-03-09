@@ -1,0 +1,169 @@
+---
+title: 'Supported Backends'
+description: 'LSP backends compatible with typemux-cc'
+---
+
+## Overview
+
+typemux-cc supports three Python LSP backends. You can switch between them using the `TYPEMUX_CC_BACKEND` environment variable.
+
+## Available Backends
+
+<Note>
+Pyright is the default backend if `TYPEMUX_CC_BACKEND` is not set.
+</Note>
+
+| Backend | Command | Status |
+|---------|---------|--------|
+| [pyright](https://github.com/microsoft/pyright) | `pyright-langserver --stdio` | ✅ Stable (**default**) |
+| [ty](https://github.com/astral-sh/ty) | `ty server` | 🧪 Experimental (verified) |
+| [pyrefly](https://github.com/facebook/pyrefly) | `pyrefly lsp` | 🧪 Experimental (verified) |
+
+## Installation Instructions
+
+### Pyright (Recommended)
+
+Pyright is the default and most stable backend.
+
+```bash
+# Via npm (recommended)
+npm install -g pyright
+
+# Via pip (alternative)
+pip install pyright
+```
+
+Verify installation:
+```bash
+which pyright-langserver
+```
+
+### ty (Experimental)
+
+ty is a new Python type checker by the creators of uv (Astral).
+
+```bash
+# Via pip
+pip install ty
+
+# Via uvx
+uvx ty
+```
+
+Verify installation:
+```bash
+which ty
+```
+
+<Info>
+ty is experimental but verified to work with typemux-cc.
+</Info>
+
+### pyrefly (Experimental)
+
+pyrefly is Meta's Python type checker.
+
+```bash
+# Via pip
+pip install pyrefly
+```
+
+Verify installation:
+```bash
+which pyrefly
+```
+
+<Info>
+pyrefly is experimental but verified to work with typemux-cc.
+</Info>
+
+## Backend Selection
+
+### Via Configuration File
+
+Create or edit `~/.config/typemux-cc/config`:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+# Select backend (pyright, ty, or pyrefly)
+export TYPEMUX_CC_BACKEND="pyright"
+EOF
+```
+
+### Via Environment Variable
+
+```bash
+# One-time use
+TYPEMUX_CC_BACKEND=ty ./target/release/typemux-cc
+
+# For current session
+export TYPEMUX_CC_BACKEND=ty
+```
+
+### Via CLI Flag
+
+```bash
+./target/release/typemux-cc --backend ty
+```
+
+## Backend-Specific Notes
+
+### Pyright
+
+- **Most mature**: Production-ready with extensive type checking features
+- **Default choice**: Automatically selected if `TYPEMUX_CC_BACKEND` is not set
+- **Installation**: Available via both npm and pip
+- **Best for**: General Python development, maximum compatibility
+
+### ty
+
+- **Performance focused**: Built by Astral (creators of uv and ruff)
+- **Experimental**: Newer project, still under active development
+- **Best for**: Users who want cutting-edge performance
+- **Note**: Some advanced type features may not be fully supported yet
+
+### pyrefly
+
+- **Meta-backed**: Developed by Facebook/Meta
+- **Experimental**: Less widely adopted than pyright
+- **Best for**: Projects already using Meta's Python tooling
+- **Note**: Smaller ecosystem and community compared to pyright
+
+## Common Issues
+
+<Warning>
+Make sure the backend command is available in your PATH before starting typemux-cc. Use `which <command>` to verify.
+</Warning>
+
+### Backend not found
+
+```bash
+# Check if backend is in PATH
+which pyright-langserver  # for pyright
+which ty                  # for ty
+which pyrefly            # for pyrefly
+
+# Check typemux-cc logs
+tail -100 /tmp/typemux-cc.log
+```
+
+### Wrong backend being used
+
+Verify your configuration:
+```bash
+# Check environment variable
+echo $TYPEMUX_CC_BACKEND
+
+# Check config file
+cat ~/.config/typemux-cc/config
+```
+
+### Backend crashes
+
+Enable detailed logging:
+```bash
+RUST_LOG=trace TYPEMUX_CC_LOG_FILE=/tmp/typemux-cc.log
+```
+
+Then check the logs for backend-specific error messages.

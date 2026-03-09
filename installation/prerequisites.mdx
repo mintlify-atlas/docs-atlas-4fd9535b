@@ -1,0 +1,206 @@
+---
+title: Prerequisites
+description: System requirements and dependencies for typemux-cc
+---
+
+Before installing typemux-cc, ensure your system meets the requirements and has the necessary dependencies installed.
+
+## Supported Platforms
+
+<CardGroup cols={2}>
+  <Card title="macOS" icon="apple">
+    **arm64 only** (Apple Silicon)
+    
+    Intel macOS users must [build from source](/installation/local-build)
+  </Card>
+  <Card title="Linux" icon="linux">
+    **x86_64** and **arm64** architectures supported
+  </Card>
+</CardGroup>
+
+<Warning>
+**Windows is currently unsupported** due to path handling differences. 
+
+If you need Windows support, consider using WSL2 (Windows Subsystem for Linux).
+</Warning>
+
+## Required Dependencies
+
+### 1. LSP Backend
+
+typemux-cc requires at least one Python type-checker backend. Choose from:
+
+<Tabs>
+  <Tab title="pyright (Recommended)">
+    **pyright** is the default and most stable backend.
+
+    <CodeGroup>
+    ```bash npm
+    npm install -g pyright
+    ```
+
+    ```bash pip
+    pip install pyright
+    ```
+    </CodeGroup>
+
+    Verify installation:
+    ```bash
+    pyright-langserver --version
+    ```
+
+    <Info>
+    pyright is used by default when `TYPEMUX_CC_BACKEND` is not set.
+    </Info>
+  </Tab>
+
+  <Tab title="ty (Experimental)">
+    **ty** is an experimental backend by the creators of uv.
+
+    <CodeGroup>
+    ```bash pip
+    pip install ty
+    ```
+
+    ```bash uvx
+    uvx ty
+    ```
+    </CodeGroup>
+
+    Verify installation:
+    ```bash
+    ty --version
+    ```
+
+    <Note>
+    To use ty, set `TYPEMUX_CC_BACKEND=ty` in your [configuration](/configuration/environment-variables).
+    </Note>
+  </Tab>
+
+  <Tab title="pyrefly (Experimental)">
+    **pyrefly** is an experimental backend by Meta.
+
+    ```bash pip
+    pip install pyrefly
+    ```
+
+    Verify installation:
+    ```bash
+    pyrefly --version
+    ```
+
+    <Note>
+    To use pyrefly, set `TYPEMUX_CC_BACKEND=pyrefly` in your [configuration](/configuration/environment-variables).
+    </Note>
+  </Tab>
+</Tabs>
+
+### 2. Git (Optional but Recommended)
+
+Git is used to determine the `.venv` search boundary. typemux-cc works without git, but venv detection is more reliable within git repositories.
+
+Verify git is installed:
+```bash
+git --version
+```
+
+<Info>
+If git is not available, typemux-cc will search for `.venv` up to the filesystem root instead of stopping at the repository boundary.
+</Info>
+
+## System Dependencies
+
+### Rust Version (Local Build Only)
+
+If you plan to [build from source](/installation/local-build), you'll need:
+
+- **Rust 1.75 or later**
+- **Cargo** (included with Rust)
+
+Check your Rust version:
+```bash
+rustc --version
+cargo --version
+```
+
+Install or update Rust:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+<Note>
+Marketplace installation does not require Rust—prebuilt binaries are downloaded automatically.
+</Note>
+
+## Virtual Environment Requirements
+
+typemux-cc has strict requirements for Python virtual environments:
+
+<Steps>
+  <Step title="Must be named .venv">
+    Only directories named `.venv` are recognized. Other names (like `venv`, `.env`, or custom names) are not supported.
+  </Step>
+
+  <Step title="Must contain pyvenv.cfg">
+    The `.venv` directory must contain a `pyvenv.cfg` file. This file is created automatically by standard tools:
+    - `python -m venv .venv`
+    - `uv sync`
+    - `uv venv`
+  </Step>
+
+  <Step title="Must be a real directory">
+    Symlinks to `.venv` may fail detection. Use actual directories when possible.
+  </Step>
+</Steps>
+
+<Warning>
+**Poetry, Conda, and other non-standard environments are not supported.**
+
+typemux-cc intentionally uses strict detection to avoid silently using the wrong environment. If you use poetry or conda, create a `.venv` directory or symlink.
+</Warning>
+
+### Verifying Your Virtual Environment
+
+Check if your `.venv` will be detected:
+
+```bash
+# Verify pyvenv.cfg exists
+ls -la .venv/pyvenv.cfg
+
+# View pyvenv.cfg contents
+cat .venv/pyvenv.cfg
+```
+
+Expected output:
+```
+home = /usr/bin
+include-system-site-packages = false
+version = 3.11.7
+```
+
+## Network Requirements (Marketplace Only)
+
+Marketplace installation requires:
+
+- **GitHub API access** (`api.github.com`)
+- **GitHub release downloads** (`github.com`)
+- **curl** command-line tool
+
+If you're behind a corporate firewall or in an offline environment, use the [local build method](/installation/local-build) instead.
+
+<Tip>
+If you encounter rate limiting from GitHub API, wait a few minutes or authenticate with the GitHub CLI (`gh auth login`) to increase your rate limit.
+</Tip>
+
+## Next Steps
+
+Once you have the prerequisites installed:
+
+<CardGroup cols={2}>
+  <Card title="Marketplace Install" icon="store" href="/installation/marketplace">
+    Install from GitHub releases (recommended)
+  </Card>
+  <Card title="Local Build" icon="hammer" href="/installation/local-build">
+    Build from source with Rust/Cargo
+  </Card>
+</CardGroup>

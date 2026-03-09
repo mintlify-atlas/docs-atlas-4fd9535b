@@ -1,0 +1,381 @@
+---
+title: Marketplace Installation
+description: Install typemux-cc from GitHub marketplace
+---
+
+Install typemux-cc from the GitHub marketplace using prebuilt binaries. This is the recommended installation method for most users.
+
+<Note>
+**Claude Code restart is required only for initial installation.** After installation, `.venv` creation and switching no longer require restarts.
+</Note>
+
+## Prerequisites
+
+Before installing from the marketplace:
+
+<Steps>
+  <Step title="Disable Official pyright Plugin">
+    You must disable the official pyright plugin to avoid conflicts.
+
+    ```bash
+    /plugin disable pyright-lsp@claude-plugins-official
+    ```
+
+    <Warning>
+    Having both typemux-cc and the official pyright plugin enabled causes conflicts. Ensure the official plugin is disabled before proceeding.
+    </Warning>
+  </Step>
+
+  <Step title="Install LSP Backend">
+    Install at least one supported backend:
+
+    <CodeGroup>
+    ```bash pyright (recommended)
+    npm install -g pyright
+    ```
+
+    ```bash ty (experimental)
+    pip install ty
+    ```
+
+    ```bash pyrefly (experimental)
+    pip install pyrefly
+    ```
+    </CodeGroup>
+
+    See [Prerequisites](/installation/prerequisites#lsp-backend) for more details.
+  </Step>
+</Steps>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Add Marketplace">
+    Add the typemux-cc marketplace repository:
+
+    ```bash
+    /plugin marketplace add K-dash/typemux-cc
+    ```
+
+    This registers the GitHub repository as a plugin source.
+  </Step>
+
+  <Step title="Install Plugin">
+    Install the plugin from the marketplace:
+
+    ```bash
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+
+    The installation script will:
+    - Detect your OS and architecture
+    - Download the appropriate binary from GitHub releases
+    - Install to `~/.claude/plugins/cache/typemux-cc-marketplace/`
+    - Make the binary executable
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Restart Claude Code to load the plugin.
+
+    <Info>
+    This restart is only needed for the initial installation. Future `.venv` changes do not require restarts.
+    </Info>
+  </Step>
+</Steps>
+
+## Verification
+
+After restarting Claude Code, verify the installation:
+
+### 1. Check Plugin Status
+
+Open a Python file and check for type-checking diagnostics. If you see type hints and error diagnostics, the plugin is working.
+
+### 2. Verify Settings
+
+Check `~/.claude/settings.json`:
+
+```json settings.json
+{
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": false,
+    "typemux-cc@typemux-cc-marketplace": true
+  }
+}
+```
+
+Both entries should be present:
+- Official pyright: `false` (disabled)
+- typemux-cc: `true` (enabled)
+
+### 3. Enable File Logging (Optional)
+
+For detailed diagnostics, enable file logging:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+# Enable file output
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+
+# Set log level (optional)
+export RUST_LOG="typemux_cc=debug"
+EOF
+```
+
+Then restart Claude Code and check the logs:
+
+```bash
+tail -f /tmp/typemux-cc.log
+```
+
+## Supported Platforms
+
+The marketplace provides prebuilt binaries for:
+
+| Platform | Architecture | Binary Name |
+|----------|-------------|-------------|
+| macOS | arm64 (Apple Silicon) | `typemux-cc-macos-arm64` |
+| Linux | x86_64 | `typemux-cc-linux-x86_64` |
+| Linux | arm64 | `typemux-cc-linux-arm64` |
+
+<Warning>
+Intel macOS and Windows are not supported via marketplace. Use [local build](/installation/local-build) for Intel macOS.
+</Warning>
+
+## Update Plugin
+
+Update to the latest version:
+
+```bash
+/plugin update typemux-cc@typemux-cc-marketplace
+```
+
+<Info>
+After updating, restart Claude Code to load the new version.
+</Info>
+
+### Update Not Taking Effect?
+
+Due to a [known Claude Code issue](https://github.com/anthropics/claude-code/issues/13799), plugin updates may not refresh cached files. If the old version persists:
+
+<Steps>
+  <Step title="Remove Cached Plugin">
+    ```bash
+    rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/
+    ```
+  </Step>
+
+  <Step title="Reinstall">
+    ```bash
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Restart Claude Code to load the fresh installation.
+  </Step>
+</Steps>
+
+## Uninstall
+
+Remove typemux-cc and re-enable the official pyright plugin:
+
+<Steps>
+  <Step title="Uninstall Plugin">
+    ```bash
+    /plugin uninstall typemux-cc@typemux-cc-marketplace
+    ```
+  </Step>
+
+  <Step title="Remove Marketplace">
+    ```bash
+    /plugin marketplace remove typemux-cc-marketplace
+    ```
+  </Step>
+
+  <Step title="Re-enable Official Plugin">
+    ```bash
+    /plugin enable pyright-lsp@claude-plugins-official
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    Restart Claude Code to apply changes.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Installation Fails
+
+<AccordionGroup>
+  <Accordion title="Binary not found for your platform">
+    **Error:**
+    ```
+    ERROR: Failed to find binary for typemux-cc-[platform]
+    ```
+
+    **Solution:**
+    - For Intel macOS: [Build from source](/installation/local-build)
+    - For Windows: Use WSL2 or [build from source](/installation/local-build)
+    - Check [releases page](https://github.com/K-dash/typemux-cc/releases) for available binaries
+  </Accordion>
+
+  <Accordion title="GitHub API rate limiting">
+    **Error:**
+    ```
+    curl: (22) HTTP 403: API rate limit exceeded
+    ```
+
+    **Solution:**
+    - Wait a few minutes and try again
+    - Authenticate with GitHub CLI: `gh auth login`
+    - Use [local build](/installation/local-build) instead
+  </Accordion>
+
+  <Accordion title="Download fails in offline environment">
+    **Error:**
+    ```
+    curl: (6) Could not resolve host
+    ```
+
+    **Solution:**
+    - Check your network connection
+    - Check corporate firewall settings
+    - Use [local build](/installation/local-build) for offline environments
+  </Accordion>
+
+  <Accordion title="Permission denied when installing">
+    **Error:**
+    ```
+    Permission denied: ~/.claude/plugins/cache/
+    ```
+
+    **Solution:**
+    ```bash
+    # Fix permissions
+    chmod -R u+w ~/.claude/plugins/cache/
+    
+    # Retry installation
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### LSP Not Working After Installation
+
+<AccordionGroup>
+  <Accordion title="No type-checking diagnostics">
+    **Check:**
+    1. Verify backend is installed:
+       ```bash
+       which pyright-langserver  # or: which ty, which pyrefly
+       ```
+    2. Check plugin is enabled in `~/.claude/settings.json`
+    3. Verify `.venv/pyvenv.cfg` exists in your project
+    4. Enable [file logging](#3-enable-file-logging-optional) and check for errors
+  </Accordion>
+
+  <Accordion title="Backend command not found">
+    **Error in logs:**
+    ```
+    Failed to spawn backend: No such file or directory (os error 2)
+    ```
+
+    **Solution:**
+    Install the backend:
+    ```bash
+    npm install -g pyright
+    # or
+    pip install ty
+    # or
+    pip install pyrefly
+    ```
+  </Accordion>
+
+  <Accordion title="Conflicts with official pyright plugin">
+    **Symptoms:**
+    - Duplicate diagnostics
+    - LSP errors
+    - Claude Code performance issues
+
+    **Solution:**
+    Ensure official plugin is disabled:
+    ```bash
+    /plugin disable pyright-lsp@claude-plugins-official
+    ```
+
+    Verify in `~/.claude/settings.json`:
+    ```json
+    "pyright-lsp@claude-plugins-official": false
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## How Marketplace Installation Works
+
+The marketplace installation uses `install.sh` from the repository, which:
+
+<Steps>
+  <Step title="Detects Platform">
+    ```bash install.sh (excerpt)
+    OS=$(uname -s)
+    ARCH=$(uname -m)
+
+    case "$OS" in
+      Darwin)
+        if [ "$ARCH" = "arm64" ]; then
+          BINARY_NAME="typemux-cc-macos-arm64"
+        else
+          echo "ERROR: Intel macOS is not supported"
+          exit 1
+        fi
+        ;;
+      Linux)
+        if [ "$ARCH" = "x86_64" ]; then
+          BINARY_NAME="typemux-cc-linux-x86_64"
+        elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+          BINARY_NAME="typemux-cc-linux-arm64"
+        fi
+        ;;
+    esac
+    ```
+  </Step>
+
+  <Step title="Downloads Binary">
+    ```bash install.sh (excerpt)
+    REPO="K-dash/typemux-cc"
+    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest")
+    DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url.*${BINARY_NAME}" | cut -d '"' -f 4)
+
+    curl -L -o "${BINARY_PATH}" "$DOWNLOAD_URL"
+    chmod +x "${BINARY_PATH}"
+    ```
+  </Step>
+
+  <Step title="Installs Wrapper">
+    The wrapper script loads configuration from `~/.config/typemux-cc/config`:
+
+    ```bash typemux-cc-wrapper.sh
+    #!/bin/bash
+    CONFIG_FILE="$HOME/.config/typemux-cc/config"
+    if [ -f "$CONFIG_FILE" ]; then
+      source "$CONFIG_FILE"
+    fi
+
+    exec "${CLAUDE_PLUGIN_ROOT}/bin/typemux-cc" "$@"
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Configure backend selection and logging
+  </Card>
+  <Card title="Usage Guide" icon="book" href="/usage/basic-usage">
+    Learn how to use typemux-cc
+  </Card>
+</CardGroup>

@@ -1,0 +1,380 @@
+---
+title: 'Config File'
+description: 'Set persistent environment variables for typemux-cc via the config file'
+---
+
+The config file allows you to set persistent environment variables that are loaded automatically when typemux-cc runs as a Claude Code plugin.
+
+## Location
+
+The config file is loaded from:
+
+```
+~/.config/typemux-cc/config
+```
+
+<Note>
+  This file is **not created by default**. You must create it manually if you want persistent configuration.
+</Note>
+
+## How It Works
+
+When typemux-cc is installed as a Claude Code plugin, the wrapper script (`plugin.json` → `start.sh`) sources this config file before launching the binary:
+
+```bash title="start.sh (plugin wrapper)"
+#!/bin/bash
+
+# Load config if exists
+if [ -f ~/.config/typemux-cc/config ]; then
+  source ~/.config/typemux-cc/config
+fi
+
+# Launch typemux-cc with loaded environment
+exec "$PLUGIN_DIR/typemux-cc"
+```
+
+<Info>
+  The config file is a standard bash script that exports environment variables. It's sourced (not executed), so you can use bash syntax like conditionals and variable expansion.
+</Info>
+
+## Creating the Config File
+
+### Quick Setup
+
+```bash
+# Create config directory
+mkdir -p ~/.config/typemux-cc
+
+# Create config file with common settings
+cat > ~/.config/typemux-cc/config << 'EOF'
+# Select backend (pyright, ty, or pyrefly)
+export TYPEMUX_CC_BACKEND="pyright"
+
+# Enable file logging
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+
+# Adjust log level (optional)
+export RUST_LOG="typemux_cc=debug"
+EOF
+
+# Restart Claude Code to apply changes
+```
+
+<Warning>
+  You **must restart Claude Code** after creating or modifying the config file. The wrapper script only loads the config at startup.
+</Warning>
+
+## Example Configurations
+
+### Minimal (Backend Selection Only)
+
+```bash title="~/.config/typemux-cc/config"
+# Use ty instead of pyright
+export TYPEMUX_CC_BACKEND="ty"
+```
+
+### Production (File Logging + Info Level)
+
+```bash title="~/.config/typemux-cc/config"
+# Backend selection
+export TYPEMUX_CC_BACKEND="pyright"
+
+# Persistent logging with minimal verbosity
+export TYPEMUX_CC_LOG_FILE="$HOME/.local/state/typemux-cc/typemux.log"
+export RUST_LOG="typemux_cc=info"
+
+# Create log directory if missing
+mkdir -p "$HOME/.local/state/typemux-cc"
+```
+
+### Development (Verbose Logging + Large Pool)
+
+```bash title="~/.config/typemux-cc/config"
+# Experimental backend
+export TYPEMUX_CC_BACKEND="ty"
+
+# Detailed logging for debugging
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc-debug.log"
+export RUST_LOG="typemux_cc=trace"
+
+# Large backend pool for monorepo work
+export TYPEMUX_CC_MAX_BACKENDS="16"
+
+# Disable TTL to keep backends alive
+export TYPEMUX_CC_BACKEND_TTL="0"
+
+# Faster warmup timeout
+export TYPEMUX_CC_WARMUP_TIMEOUT="1"
+```
+
+### Conditional Configuration (Advanced)
+
+```bash title="~/.config/typemux-cc/config"
+# Use different backends based on hostname
+if [[ $(hostname) == "work-laptop" ]]; then
+  export TYPEMUX_CC_BACKEND="pyright"
+else
+  export TYPEMUX_CC_BACKEND="ty"
+fi
+
+# Always enable logging
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+
+# Verbose logging only on development machine
+if [[ $(hostname) == "dev-machine" ]]; then
+  export RUST_LOG="typemux_cc=trace"
+else
+  export RUST_LOG="typemux_cc=info"
+fi
+```
+
+## Available Settings
+
+All [environment variables](/configuration/environment-variables) can be set in the config file:
+
+| Variable | Purpose | Default |
+|----------|---------|--------|
+| `TYPEMUX_CC_BACKEND` | LSP backend (pyright, ty, pyrefly) | `pyright` |
+| `TYPEMUX_CC_LOG_FILE` | Log file path | *(not set)* |
+| `TYPEMUX_CC_MAX_BACKENDS` | Max concurrent backends | `8` |
+| `TYPEMUX_CC_BACKEND_TTL` | Backend TTL in seconds (0=disabled) | `1800` |
+| `TYPEMUX_CC_WARMUP_TIMEOUT` | Warmup timeout in seconds (0=disabled) | `2` |
+| `RUST_LOG` | Log level (info, debug, trace) | `typemux_cc=debug` |
+
+See [Environment Variables](/configuration/environment-variables) for detailed descriptions.
+
+## Config vs CLI Flags
+
+### When to Use Config File
+
+✅ **Use config file when:**
+- Running typemux-cc as a Claude Code plugin (standard usage)
+- Settings should persist across sessions
+- You want to switch backends without modifying Claude Code settings
+- Enabling persistent logging for troubleshooting
+
+### When to Use CLI Flags
+
+✅ **Use CLI flags when:**
+- Running typemux-cc manually (development/testing)
+- Temporarily overriding config file settings
+- Automating with scripts that need specific configurations
+- Testing different backends without editing config
+
+**Example: CLI flag override**
+
+```bash
+# Config file has: TYPEMUX_CC_BACKEND="pyright"
+# Temporarily test with ty:
+./target/release/typemux-cc --backend ty
+```
+
+<Info>
+  CLI flags take precedence over environment variables (including those from config file).
+</Info>
+
+## Verifying Configuration
+
+Check that your config is loaded correctly:
+
+### 1. Check Environment Variables
+
+```bash
+# Source the config manually to test
+source ~/.config/typemux-cc/config
+
+# Verify variables are set
+echo $TYPEMUX_CC_BACKEND
+echo $TYPEMUX_CC_LOG_FILE
+```
+
+### 2. Check Logs (if file logging enabled)
+
+```bash
+# Config must specify log file location
+tail -20 /tmp/typemux-cc.log
+```
+
+Look for the startup message:
+
+```log
+[INFO] Starting LSP proxy (logging to stderr and file) backend=ty
+```
+
+The `backend=` field shows which backend was selected.
+
+### 3. Test Backend Selection
+
+```bash
+# Open a Python file in Claude Code and check logs
+grep "Creating new backend" /tmp/typemux-cc.log
+```
+
+**Expected output:**
+```
+[INFO] Creating new backend for venv: /project/.venv (session 1) backend=ty
+```
+
+## Troubleshooting
+
+### Config Changes Not Applied
+
+<Warning>
+  **Most common issue:** Forgot to restart Claude Code after editing config.
+</Warning>
+
+**Solution:**
+1. Save config file
+2. Fully quit Claude Code (not just close window)
+3. Restart Claude Code
+4. Check logs to verify settings
+
+### Config File Not Loaded
+
+**Check file location:**
+
+```bash
+ls -la ~/.config/typemux-cc/config
+```
+
+**Should output:**
+```
+-rw-r--r-- 1 user user 123 Mar 09 10:00 /home/user/.config/typemux-cc/config
+```
+
+**Common mistakes:**
+- Wrong directory: `~/.config/typemux/config` ❌ (should be `typemux-cc`)
+- Wrong filename: `~/.config/typemux-cc/config.sh` ❌ (should be `config` with no extension)
+- File not readable: `chmod 644 ~/.config/typemux-cc/config`
+
+### Backend Not Found
+
+**Error in logs:**
+```
+[ERROR] backend spawn failed: ty: command not found
+```
+
+**Solution:** Install the backend binary:
+
+```bash
+# For pyright
+npm install -g pyright
+
+# For ty
+pip install ty
+
+# For pyrefly
+pip install pyrefly
+```
+
+Then verify it's in PATH:
+
+```bash
+which pyright-langserver  # or: which ty, which pyrefly
+```
+
+### Log File Permission Denied
+
+**Error:**
+```
+[ERROR] Failed to create log file: Permission denied
+```
+
+**Solution:** Use a writable directory:
+
+```bash
+# Good locations:
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"                    # Temporary
+export TYPEMUX_CC_LOG_FILE="$HOME/.local/state/typemux-cc.log"     # Persistent
+
+# Create parent directory if needed
+mkdir -p "$HOME/.local/state"
+```
+
+## Advanced: Dynamic Configuration
+
+Since the config file is a bash script, you can use logic to set variables dynamically:
+
+### Project-Specific Backend
+
+```bash title="~/.config/typemux-cc/config"
+# Detect current project by checking git root
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+
+if [[ $GIT_ROOT == *"/my-company-repo" ]]; then
+  # Company project uses pyright
+  export TYPEMUX_CC_BACKEND="pyright"
+else
+  # Personal projects use ty
+  export TYPEMUX_CC_BACKEND="ty"
+fi
+```
+
+<Warning>
+  The wrapper script runs in the **plugin directory**, not your project directory. Git commands may not work as expected. This example is for illustration only.
+</Warning>
+
+### Environment-Based Configuration
+
+```bash title="~/.config/typemux-cc/config"
+# Check if running in CI environment
+if [[ -n "$CI" ]]; then
+  export RUST_LOG="typemux_cc=info"
+  export TYPEMUX_CC_MAX_BACKENDS="4"  # Lower memory usage
+else
+  export RUST_LOG="typemux_cc=debug"
+  export TYPEMUX_CC_MAX_BACKENDS="16"  # More backends locally
+fi
+```
+
+## Config File Template
+
+Copy this template to get started:
+
+```bash title="~/.config/typemux-cc/config"
+#!/bin/bash
+# typemux-cc configuration
+# Loaded automatically when running as Claude Code plugin
+# Restart Claude Code after editing
+
+# ============================================================================
+# Backend Selection
+# ============================================================================
+# Options: pyright (default), ty, pyrefly
+export TYPEMUX_CC_BACKEND="pyright"
+
+# ============================================================================
+# Logging
+# ============================================================================
+# File logging (comment out to disable)
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+
+# Log level: info (minimal), debug (default), trace (verbose)
+export RUST_LOG="typemux_cc=debug"
+
+# ============================================================================
+# Backend Pool Management
+# ============================================================================
+# Max concurrent backends (default: 8)
+# Increase for monorepos, decrease for memory-constrained systems
+export TYPEMUX_CC_MAX_BACKENDS="8"
+
+# Backend TTL in seconds (default: 1800 = 30 minutes)
+# Set to 0 to disable TTL-based eviction
+export TYPEMUX_CC_BACKEND_TTL="1800"
+
+# Warmup timeout in seconds (default: 2)
+# Set to 0 to disable warmup (forward requests immediately)
+export TYPEMUX_CC_WARMUP_TIMEOUT="2"
+
+# ============================================================================
+# Advanced
+# ============================================================================
+# Create log directory if it doesn't exist
+mkdir -p "$(dirname "$TYPEMUX_CC_LOG_FILE")"
+```
+
+## Related Pages
+
+- [Environment Variables](/configuration/environment-variables) - Complete env var reference
+- [Logging](/configuration/logging) - Log monitoring and analysis

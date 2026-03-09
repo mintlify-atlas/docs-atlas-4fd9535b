@@ -1,0 +1,359 @@
+---
+title: 'Logging'
+description: 'Configure, monitor, and analyze typemux-cc logs for debugging and diagnostics'
+---
+
+Logging is essential for understanding typemux-cc's behavior, diagnosing issues, and monitoring backend pool activity.
+
+## Default Behavior
+
+By default, typemux-cc writes logs to **stderr only**:
+
+```bash
+./target/release/typemux-cc
+# Logs appear in terminal stderr
+```
+
+This is suitable for development but not persistent across sessions.
+
+## Enabling File Logging
+
+### Method 1: Environment Variable (Quick)
+
+Set `TYPEMUX_CC_LOG_FILE` to enable both stderr and file output:
+
+```bash
+TYPEMUX_CC_LOG_FILE=/tmp/typemux-cc.log ./target/release/typemux-cc
+```
+
+<Note>
+  When `TYPEMUX_CC_LOG_FILE` is set, logs are written to **both stderr AND the file**. This allows real-time monitoring while preserving a persistent record.
+</Note>
+
+### Method 2: Config File (Persistent)
+
+For persistent logging across Claude Code restarts:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+# Enable file logging
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+
+# Optional: adjust log level
+export RUST_LOG="typemux_cc=debug"
+EOF
+
+# Restart Claude Code to apply changes
+```
+
+See [Config File](/configuration/config-file) for more details.
+
+## Log Levels
+
+Control log verbosity with the `RUST_LOG` environment variable:
+
+<ParamField path="RUST_LOG" type="string" default="typemux_cc=debug">
+  
+  ### Available Levels
+  
+  | Level | What You See | Use Case |
+  |-------|--------------|----------|
+  | `info` | High-level events only | Production, minimal overhead |
+  | `debug` | **Default**. Includes method names and venv searches | General debugging |
+  | `trace` | All search steps and detailed state | Deep troubleshooting |
+  
+  ### Examples
+  
+  **Minimal logging (production):**
+  ```bash
+  export RUST_LOG="typemux_cc=info"
+  ```
+  
+  **Default (recommended for development):**
+  ```bash
+  export RUST_LOG="typemux_cc=debug"
+  ```
+  
+  **Maximum verbosity (troubleshooting):**
+  ```bash
+  export RUST_LOG="typemux_cc=trace"
+  ```
+</ParamField>
+
+### What Each Level Shows
+
+#### `info` - High-Level Events
+
+```
+Starting LSP proxy (logging to stderr and file)
+Backend warmup complete, draining queued requests
+venv switch: project-a/.venv -> project-b/.venv
+```
+
+#### `debug` - Default Level
+
+Includes everything from `info` plus:
+
+```
+Searching for .venv from: /home/user/project/src/main.py
+Found .venv at: /home/user/project/.venv
+textDocument/definition -> session 1
+Creating new backend for venv: /home/user/project/.venv
+```
+
+#### `trace` - Deep Debugging
+
+Includes everything from `debug` plus:
+
+```
+Checking parent directory: /home/user/project/src
+Checking parent directory: /home/user/project
+pyvenv.cfg found at: /home/user/project/.venv/pyvenv.cfg
+Forwarding request id=42 method=textDocument/hover to backend session=1
+```
+
+<Warning>
+  `trace` level produces **very large log files**. Use only when debugging specific issues, then switch back to `debug`.
+</Warning>
+
+## Real-Time Monitoring
+
+Monitor logs in real-time using `tail`:
+
+```bash
+# Follow log output (press Ctrl+C to stop)
+tail -f /tmp/typemux-cc.log
+```
+
+<Tip>
+  Open a separate terminal for real-time monitoring while working in Claude Code. This helps understand what's happening behind the scenes.
+</Tip>
+
+## Useful Log Queries
+
+Grep patterns for common debugging scenarios:
+
+### Monitor Backend Pool Activity
+
+```bash
+# Show all backend lifecycle events
+grep -E "(Creating new backend|Evicting|Backend warmup)" /tmp/typemux-cc.log
+```
+
+**Example output:**
+```
+[INFO] Creating new backend for venv: /project-a/.venv (session 1)
+[INFO] Backend warmup complete, draining queued requests (session 1)
+[INFO] Creating new backend for venv: /project-b/.venv (session 2)
+[INFO] Evicting LRU backend: /project-a/.venv (session 1)
+```
+
+### Track Warmup Transitions
+
+```bash
+grep "warmup" /tmp/typemux-cc.log
+```
+
+**What to look for:**
+- `Warming -> Ready` indicates successful index build
+- Long warmup times may indicate large codebases
+- Queued request counts show how many requests waited
+
+### View Document Restoration
+
+```bash
+grep "Document restoration completed" /tmp/typemux-cc.log
+```
+
+**Example output:**
+```
+[INFO] Document restoration completed: restored=5 skipped=3 (session 2)
+```
+
+This shows how many open documents were sent to a newly spawned backend.
+
+### Find Session Transitions
+
+```bash
+grep "session=" /tmp/typemux-cc.log | grep -E "(Starting|completed)"
+```
+
+Useful for understanding backend lifecycle and request routing.
+
+### Debug .venv Detection Issues
+
+```bash
+# Show all venv search activity
+grep -i "venv" /tmp/typemux-cc.log
+
+# Show failures only
+grep "venv.*not found" /tmp/typemux-cc.log
+```
+
+**Common issues:**
+- `venv_path=None` in logs → file opened before `.venv` was created
+- No search logs → document using cached venv from previous open
+
+### Filter by Time Range (with timestamps)
+
+If your logs include timestamps, filter by time:
+
+```bash
+# Show last 100 lines
+tail -100 /tmp/typemux-cc.log
+
+# Show logs from the last hour
+find /tmp/typemux-cc.log -mmin -60 -exec tail -f {} \;
+```
+
+## Log Rotation
+
+<Info>
+  typemux-cc uses `Rotation::NEVER` - logs are appended to the same file indefinitely.
+</Info>
+
+For long-running sessions, you may want to rotate logs manually:
+
+```bash
+# Move old log and restart typemux-cc (via Claude Code restart)
+mv /tmp/typemux-cc.log /tmp/typemux-cc.log.old
+
+# Or truncate if file gets too large
+> /tmp/typemux-cc.log
+```
+
+<Warning>
+  Truncating the log file while typemux-cc is running may cause issues. Restart Claude Code after truncating.
+</Warning>
+
+## Interpreting Common Log Messages
+
+### Backend Spawn Events
+
+```log
+[INFO] Creating new backend for venv: /project/.venv (session 1)
+[INFO] Starting LSP proxy (logging to stderr and file) backend=pyright
+```
+
+**Meaning:** A new backend process started for the detected `.venv`.
+
+### Warmup State
+
+```log
+[INFO] Backend warmup complete, draining queued requests (session 1) queued_count=3
+```
+
+**Meaning:** Backend finished building its index. 3 queued requests are now being sent.
+
+### LRU Eviction
+
+```log
+[INFO] Evicting LRU backend: /project-a/.venv (session 1)
+```
+
+**Meaning:** Pool was full, least recently used backend evicted to make room.
+
+### TTL Eviction
+
+```log
+[DEBUG] TTL eviction: idle backend /project-b/.venv (session 2)
+```
+
+**Meaning:** Backend was idle for longer than `TYPEMUX_CC_BACKEND_TTL` (default 30 minutes).
+
+### Venv Search
+
+```log
+[DEBUG] Searching for .venv from: /project/src/main.py
+[DEBUG] Found .venv at: /project/.venv
+```
+
+**Meaning:** Successfully located `.venv` by traversing parent directories.
+
+### Document Restoration
+
+```log
+[INFO] Document restoration completed: restored=5 skipped=3 (session 2)
+```
+
+**Meaning:** After spawning backend for project-b, sent 5 documents under project-b/, skipped 3 from other projects.
+
+## Troubleshooting with Logs
+
+### Issue: LSP not responding
+
+**Check logs for:**
+
+```bash
+grep -E "(backend.*crash|reader.*error|spawn.*failed)" /tmp/typemux-cc.log
+```
+
+Common causes:
+- Backend binary not found in PATH
+- Backend crashed during initialization
+- Permission issues with `.venv` directory
+
+### Issue: Wrong completions/types
+
+**Check for:**
+
+```bash
+grep "venv_path" /tmp/typemux-cc.log | tail -20
+```
+
+**Look for:**
+- `venv_path=None` → No `.venv` detected (strict venv mode)
+- Wrong venv path → Document using cached venv from first open
+- Multiple venv paths for same file → Cache invalidation issues
+
+**Solution:** Reopen the file to trigger fresh venv detection.
+
+### Issue: Slow response after file open
+
+**Check warmup times:**
+
+```bash
+grep -A 5 "Creating new backend" /tmp/typemux-cc.log | grep -E "(Creating|warmup)"
+```
+
+Large projects may take 5-10 seconds to build their index. Consider:
+- Increasing `TYPEMUX_CC_WARMUP_TIMEOUT` if timeout expires prematurely
+- Keeping `TYPEMUX_CC_BACKEND_TTL` high to avoid frequent re-initialization
+
+## Log Output Format
+
+Logs include these fields (from `main.rs:64-75`):
+
+- **Timestamp** (implicit)
+- **Level**: `INFO`, `DEBUG`, `TRACE`, `WARN`, `ERROR`
+- **Target**: Rust module path (e.g., `typemux_cc::proxy`)
+- **Thread ID**: For concurrent debugging
+- **Message**: Human-readable event description
+- **Structured fields**: `venv=`, `session=`, `method=`, etc.
+
+**Example:**
+```log
+[2026-03-09T10:32:15Z INFO  typemux_cc::backend_pool thread=4] Creating new backend for venv: /project/.venv (session 1)
+```
+
+## Performance Considerations
+
+<ParamField path="Log Level" type="impact">
+  
+  | Level | CPU Overhead | Disk I/O | File Size |
+  |-------|--------------|----------|----------|
+  | `info` | Minimal | Low | Small |
+  | `debug` | Low | Medium | Medium |
+  | `trace` | **High** | **High** | **Large** |
+  
+</ParamField>
+
+<Tip>
+  For production use in Claude Code, keep `RUST_LOG=typemux_cc=debug` (default). Switch to `info` only if performance is critical and you don't need debugging.
+</Tip>
+
+## Related Pages
+
+- [Environment Variables](/configuration/environment-variables) - Complete env var reference
+- [Config File](/configuration/config-file) - Persistent logging configuration

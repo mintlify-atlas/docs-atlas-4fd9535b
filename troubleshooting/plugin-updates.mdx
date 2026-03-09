@@ -1,0 +1,309 @@
+---
+title: "Plugin Updates"
+description: "How to update typemux-cc and fix cache issues"
+---
+
+## Known Claude Code Cache Issue
+
+Claude Code has a [known issue](https://github.com/anthropics/claude-code/issues/13799) where `/plugin update` does not refresh cached plugin files.
+
+<Warning>
+After running `/plugin update`, you may still see the old version of typemux-cc running because Claude Code serves the plugin from cache instead of the newly downloaded files.
+</Warning>
+
+## Symptoms of Stale Cache
+
+If you experience any of these after updating:
+
+- New features mentioned in release notes are not available
+- Bug fixes don't take effect
+- Log messages show an old version number
+- Behavior hasn't changed despite update command succeeding
+
+**You likely have a cached plugin that needs manual clearing.**
+
+## Manual Cache Clearing Steps
+
+<Steps>
+
+<Step title="Remove cached plugin files">
+
+```bash
+rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/
+```
+
+This removes the cached version that Claude Code is serving.
+
+</Step>
+
+<Step title="Reinstall the plugin">
+
+```bash
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+This downloads fresh plugin files from the marketplace.
+
+</Step>
+
+<Step title="Restart Claude Code">
+
+Completely quit and restart Claude Code (not just reload window).
+
+</Step>
+
+</Steps>
+
+<Tip>
+Bookmark this page for quick reference next time you update typemux-cc.
+</Tip>
+
+## Verifying Update Succeeded
+
+After reinstalling and restarting, verify the new version is active:
+
+### 1. Check Plugin Directory
+
+```bash
+ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/
+```
+
+Check the timestamp — it should match when you ran the reinstall command.
+
+### 2. Check Binary Version
+
+If the plugin includes version info in logs:
+
+```bash
+# Enable file logging first if not already enabled
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+EOF
+```
+
+Restart Claude Code, open a Python file, and check logs:
+
+```bash
+head -20 /tmp/typemux-cc.log | grep -i version
+```
+
+### 3. Test New Features
+
+If the update added new features, test them:
+
+```bash
+# Example: if a new backend was added
+echo 'export TYPEMUX_CC_BACKEND="new-backend"' >> ~/.config/typemux-cc/config
+```
+
+Restart Claude Code and verify it works.
+
+## Reinstalling After Update (Full Procedure)
+
+If you want to be thorough, follow this complete reinstall procedure:
+
+<Steps>
+
+<Step title="Check current version">
+
+```bash
+ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/
+```
+
+Note the timestamp of existing files.
+
+</Step>
+
+<Step title="Update via Claude Code">
+
+```bash
+/plugin update typemux-cc@typemux-cc-marketplace
+```
+
+Wait for the command to complete.
+
+</Step>
+
+<Step title="Clear the cache">
+
+```bash
+rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/
+```
+
+</Step>
+
+<Step title="Reinstall">
+
+```bash
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+</Step>
+
+<Step title="Verify fresh files">
+
+```bash
+ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/
+```
+
+Timestamp should be newer than before.
+
+</Step>
+
+<Step title="Restart Claude Code">
+
+Quit Claude Code completely and restart.
+
+</Step>
+
+</Steps>
+
+## When to Manually Clear Cache
+
+You should manually clear cache in these situations:
+
+<AccordionGroup>
+
+<Accordion title="After Every Update">
+
+**Recommended:** Manually clear cache after **every** `/plugin update` to ensure you're running the latest version.
+
+```bash
+rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/ && \
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+</Accordion>
+
+<Accordion title="Bug Fixes Not Working">
+
+If release notes mention a bug fix but you still see the bug:
+
+1. Clear cache
+2. Reinstall
+3. Test again
+
+If the bug persists after a fresh install, it may not be fixed yet or you may have a different issue.
+
+</Accordion>
+
+<Accordion title="After Manual Plugin File Edits">
+
+If you manually edited files in `~/.claude/plugins/cache/typemux-cc-marketplace/` for testing:
+
+**Always reinstall afterward:**
+
+```bash
+rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+<Warning>
+Manual edits to cached plugin files are for debugging only. They will be lost on next update.
+</Warning>
+
+</Accordion>
+
+<Accordion title="Unexplained Behavior After Update">
+
+If typemux-cc behaves strangely after an update:
+
+1. Clear cache and reinstall (as shown above)
+2. Enable trace logging:
+   ```bash
+   echo 'export RUST_LOG="typemux_cc=trace"' > ~/.config/typemux-cc/config
+   echo 'export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"' >> ~/.config/typemux-cc/config
+   ```
+3. Restart Claude Code
+4. Check logs for errors:
+   ```bash
+   grep -i error /tmp/typemux-cc.log
+   ```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Alternative: Local Development Install
+
+If you frequently encounter cache issues, consider using a local development install:
+
+```bash
+# Clone the repo
+git clone https://github.com/K-dash/typemux-cc.git
+cd typemux-cc
+
+# Build from source
+cargo build --release
+
+# Install as local plugin
+/plugin marketplace add /path/to/typemux-cc
+/plugin install typemux-cc@typemux-cc-marketplace
+
+# Restart Claude Code
+```
+
+<Info>
+With a local install, you control when to update by pulling from git and rebuilding. No cache surprises.
+</Info>
+
+## Update Checklist
+
+Use this checklist every time you update typemux-cc:
+
+- [ ] Run `/plugin update typemux-cc@typemux-cc-marketplace`
+- [ ] Remove cache: `rm -rf ~/.claude/plugins/cache/typemux-cc-marketplace/`
+- [ ] Reinstall: `/plugin install typemux-cc@typemux-cc-marketplace`
+- [ ] Verify new timestamp: `ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/`
+- [ ] Restart Claude Code
+- [ ] Open a Python file and verify type-checking works
+- [ ] Check logs for any errors: `tail -50 /tmp/typemux-cc.log`
+
+## Downgrading to Previous Version
+
+If an update introduces a regression:
+
+<Note>
+Claude Code plugin system doesn't support version pinning directly, but you can install from a specific git tag.
+</Note>
+
+```bash
+# 1. Clone repo and checkout specific version
+git clone https://github.com/K-dash/typemux-cc.git
+cd typemux-cc
+git checkout v0.1.0  # Replace with desired version
+
+# 2. Build
+cargo build --release
+
+# 3. Remove marketplace version
+/plugin uninstall typemux-cc@typemux-cc-marketplace
+
+# 4. Install local version
+/plugin marketplace add /path/to/typemux-cc
+/plugin install typemux-cc@typemux-cc-marketplace
+
+# 5. Restart Claude Code
+```
+
+## Reporting Update Issues
+
+If you suspect a plugin update problem:
+
+1. **Confirm cache is clear:**
+   ```bash
+   ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/
+   ```
+   Timestamp should be recent.
+
+2. **Capture logs:**
+   ```bash
+   tail -100 /tmp/typemux-cc.log > typemux-update-issue.log
+   ```
+
+3. **Include in report:**
+   - Output of `ls -lh ~/.claude/plugins/cache/typemux-cc-marketplace/`
+   - Steps you followed to update
+   - Log file
+   - Expected vs actual behavior

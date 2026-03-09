@@ -1,0 +1,306 @@
+---
+title: ".venv Not Switching"
+description: "Why virtual environment detection might fail and how to fix it"
+---
+
+## Problem Overview
+
+If type-checking is not using your project's `.venv` dependencies, or you see `venv_path=None` in logs, this guide will help you diagnose and fix the issue.
+
+## Why .venv Might Not Switch
+
+<AccordionGroup>
+
+<Accordion title="Cache Behavior: Late .venv Creation">
+
+**This is the most common reason.**
+
+<Note>
+**Why does this happen?** typemux-cc caches the venv for each document on first open. If `.venv` doesn't exist yet (e.g., created later by a hook or script), the cache stores `None`. Subsequent requests reuse the cached value without re-searching.
+</Note>
+
+**Scenario:**
+
+1. You create a git worktree: `git worktree add ../my-project-worktree feat/new-feature`
+2. Claude Code opens a file from the worktree (no `.venv` exists yet)
+3. typemux-cc caches `venv_path=None` for that file
+4. You create `.venv`: `cd ../my-project-worktree && uv sync`
+5. Type-checking still doesn't work because the cache still has `None`
+
+**Solution:** Reopen the file after creating `.venv` (see below).
+
+</Accordion>
+
+<Accordion title="Missing pyvenv.cfg">
+
+typemux-cc only recognizes `.venv` directories that contain a `pyvenv.cfg` file. This is intentional to avoid silently using the wrong environment.
+
+**Check if pyvenv.cfg exists:**
+
+```bash
+ls .venv/pyvenv.cfg
+```
+
+If it doesn't exist, your "virtualenv" might be:
+- A conda environment (not supported)
+- A Poetry environment (not supported)
+- A manually created directory without proper venv structure
+
+<Warning>
+typemux-cc intentionally only supports standard `.venv` directories with `pyvenv.cfg`. Using conda/poetry without a proper `.venv` symlink will result in no venv detection.
+</Warning>
+
+**Solution:** Create a proper venv or symlink:
+
+```bash
+# Create a new .venv
+python -m venv .venv
+
+# Or symlink to existing venv
+ln -s /path/to/actual/venv .venv
+```
+
+</Accordion>
+
+<Accordion title="File Outside Git Repository">
+
+typemux-cc searches for `.venv` upward from the file location, stopping at the git repository root. If the file is outside a git repository, venv detection may fail.
+
+**Check if file is in a git repo:**
+
+```bash
+git rev-parse --show-toplevel
+```
+
+If this returns an error, the file is not in a git repository.
+
+<Info>
+typemux-cc works without git, but uses repository boundaries to determine where to stop searching for `.venv`. This prevents searching too far up the filesystem tree.
+</Info>
+
+**Solution:** Initialize a git repository:
+
+```bash
+git init
+```
+
+</Accordion>
+
+<Accordion title="Symlinked .venv Directory">
+
+If `.venv` is a symlink, venv detection may fail in some cases depending on how symlinks are resolved.
+
+**Check if .venv is a symlink:**
+
+```bash
+ls -la .venv
+```
+
+If it shows `->`, it's a symlink.
+
+**Solution:** Use an actual directory instead of a symlink, or ensure the symlink target contains `pyvenv.cfg`:
+
+```bash
+# Check symlink target has pyvenv.cfg
+ls -la .venv/pyvenv.cfg
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Reopening Files to Trigger Re-Detection
+
+When you create `.venv` after files are already open, you must reopen those files to clear the cache:
+
+<Steps>
+
+<Step title="Create or fix your .venv">
+
+```bash
+# Create new venv
+python -m venv .venv
+
+# Or using uv
+uv sync
+
+# Or using rye
+rye sync
+```
+
+</Step>
+
+<Step title="Verify pyvenv.cfg exists">
+
+```bash
+ls .venv/pyvenv.cfg
+```
+
+If this file doesn't exist, typemux-cc will not detect the venv.
+
+</Step>
+
+<Step title="Close and reopen files in Claude Code">
+
+Simply reopening the file clears the cache entry and triggers a fresh venv search.
+
+**In Claude Code:**
+- Close the file tab
+- Reopen the file from the file tree
+
+**Or restart Claude Code** to clear all cached venv paths.
+
+</Step>
+
+</Steps>
+
+<Tip>
+You don't need to restart Claude Code. Just close and reopen the file tab.
+</Tip>
+
+## Verification Steps
+
+After reopening the file, verify that venv detection is working:
+
+### 1. Enable File Logging
+
+If not already enabled:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+EOF
+```
+
+Restart Claude Code.
+
+### 2. Check Logs for Venv Path
+
+Open a Python file and check the logs:
+
+```bash
+grep venv_path /tmp/typemux-cc.log | tail -5
+```
+
+You should see something like:
+
+```
+venv_path=Some("/path/to/your/project/.venv")
+```
+
+If you see `venv_path=None`, the venv was not detected.
+
+### 3. Test Import Resolution
+
+Open a Python file and try importing a package that's only in your `.venv`:
+
+```python
+import some_package_only_in_venv
+```
+
+If type-checking works and shows no import error, venv detection is successful.
+
+## Debugging with RUST_LOG=trace
+
+For detailed venv search logs, enable trace-level logging:
+
+```bash
+cat >> ~/.config/typemux-cc/config << 'EOF'
+export RUST_LOG="typemux_cc=trace"
+EOF
+```
+
+Restart Claude Code and reopen a file. Check the logs:
+
+```bash
+grep -A5 "searching for venv" /tmp/typemux-cc.log
+```
+
+This will show:
+- Which directories were searched
+- Where the search stopped (git root)
+- Why `.venv` was or wasn't found
+
+<Warning>
+Trace logging is very verbose. Only use it for debugging, then switch back to `debug` level.
+</Warning>
+
+## Common Scenarios
+
+### Git Worktree Workflow
+
+**Problem:** Created worktree, added `.venv` later, type-checking still doesn't work.
+
+**Solution:**
+
+```bash
+# 1. Verify .venv exists
+ls .venv/pyvenv.cfg
+
+# 2. Check logs
+grep venv_path /tmp/typemux-cc.log | tail -1
+
+# 3. If it shows None, reopen the file in Claude Code
+# Close tab -> Reopen from file tree
+
+# 4. Verify again
+grep venv_path /tmp/typemux-cc.log | tail -1
+# Should now show: venv_path=Some("/path/to/worktree/.venv")
+```
+
+### Monorepo: Wrong .venv Detected
+
+**Problem:** Multiple `.venv` directories exist, and the wrong one is being used.
+
+**Behavior:** typemux-cc uses the **closest** `.venv` to the file being edited.
+
+**Example:**
+
+```
+my-monorepo/          # git root
+├── .venv/            # Global venv
+└── project-a/
+    ├── .venv/        # Project-specific venv (used for files in project-a/)
+    └── src/main.py
+```
+
+When editing `project-a/src/main.py`, typemux-cc will use `project-a/.venv`, not the root `.venv`.
+
+<Info>
+This is expected behavior. If you want to use a different venv, remove or rename the closer `.venv` directory.
+</Info>
+
+### .venv Created by Hook
+
+**Problem:** A git hook or script creates `.venv` automatically, but type-checking doesn't work.
+
+**Why:** The file was opened **before** the hook ran, so `venv_path=None` is cached.
+
+**Solution:** Reopen files after the hook completes:
+
+```bash
+# If using a pre-commit hook that creates .venv:
+# 1. Let the hook run
+# 2. Close and reopen files in Claude Code
+# 3. Type-checking should now work
+```
+
+## Still Not Working?
+
+If venv detection still fails after trying all the above:
+
+1. **Enable trace logging:**
+   ```bash
+   echo 'export RUST_LOG="typemux_cc=trace"' > ~/.config/typemux-cc/config
+   echo 'export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"' >> ~/.config/typemux-cc/config
+   ```
+
+2. **Restart Claude Code**
+
+3. **Open a Python file** and check trace logs:
+   ```bash
+   grep -A10 "searching for venv" /tmp/typemux-cc.log
+   ```
+
+4. **Share the logs** when reporting the issue (include the "searching for venv" section)

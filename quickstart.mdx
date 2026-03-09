@@ -1,80 +1,359 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get typemux-cc up and running in under 5 minutes
 ---
 
-## Get started in three steps
+This guide will help you install typemux-cc and verify it's working correctly. By the end, you'll have automatic `.venv` detection working in your Claude Code session.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites Check
 
-### Step 1: Set up your local environment
+Before installing typemux-cc, ensure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<Steps>
+  <Step title="Supported operating system">
+    <Info>
+      **Supported platforms:**
+      - macOS (arm64 only - Apple Silicon)
+      - Linux (x86_64 or arm64)
+      
+      **Unsupported:**
+      - Windows (use WSL2 instead)
+      - Intel macOS (must build from source)
+    </Info>
+  </Step>
+  
+  <Step title="Git installed (recommended)">
+    Git is used to determine `.venv` search boundaries. typemux-cc works without it, but you'll get better venv detection with it.
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git --version
+    ```
+  </Step>
+</Steps>
 
-### Step 2: Deploy your changes
+## Installation
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+### Step 1: Install a Backend
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+First, install your preferred Python LSP backend. We recommend starting with **pyright** (it's stable and widely used).
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<CodeGroup>
+```bash pyright (recommended)
+npm install -g pyright
+```
 
-### Step 3: Go live
+```bash pyright (via pip)
+pip install pyright
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```bash ty (experimental)
+pip install ty
+# or with uvx:
+uvx ty
+```
 
-## Next steps
+```bash pyrefly (experimental)
+pip install pyrefly
+```
+</CodeGroup>
 
-Now that you have your docs running, explore these key features:
+Verify installation:
 
-<CardGroup cols={2}>
+```bash
+# For pyright:
+which pyright-langserver
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+# For ty:
+which ty
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+# For pyrefly:
+which pyrefly
+```
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+You should see a path to the executable. If not, ensure the installation location is in your `PATH`.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+**Backend selection:** The default backend is pyright. To use ty or pyrefly, you'll set `TYPEMUX_CC_BACKEND` after installation (see Step 4).
 </Note>
+
+### Step 2: Disable Official Pyright Plugin
+
+You **must** disable the official pyright plugin to avoid conflicts. Having both plugins enabled will cause issues.
+
+```bash
+/plugin disable pyright-lsp@claude-plugins-official
+```
+
+<Warning>
+Skipping this step will cause both plugins to fight over LSP requests, resulting in duplicate diagnostics and unpredictable behavior.
+</Warning>
+
+### Step 3: Install typemux-cc via Marketplace
+
+Install typemux-cc from the GitHub marketplace:
+
+```bash
+# Add the marketplace
+/plugin marketplace add K-dash/typemux-cc
+
+# Install the plugin
+/plugin install typemux-cc@typemux-cc-marketplace
+```
+
+<Info>
+Installation uses the GitHub API and `curl`. It may fail in offline environments or under API rate limiting. If you encounter issues, see the [troubleshooting guide](/troubleshooting/common-issues).
+</Info>
+
+### Step 4: Restart Claude Code
+
+Restart Claude Code to activate the plugin.
+
+<Note>
+**This is the only time you need to restart.** After this initial installation, creating or switching `.venv` no longer requires restarts — that's the whole point of typemux-cc!
+</Note>
+
+### Step 5: Verify Installation
+
+After restarting, verify that typemux-cc is enabled:
+
+```bash
+cat ~/.claude/settings.json | grep typemux
+```
+
+You should see:
+
+```json ~/.claude/settings.json
+{
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": false,
+    "typemux-cc@typemux-cc-marketplace": true
+  }
+}
+```
+
+<Tip>
+If `typemux-cc@typemux-cc-marketplace` shows `false`, manually set it to `true` and restart Claude Code.
+</Tip>
+
+## Verify It Works
+
+Let's test that typemux-cc correctly detects a `.venv` and provides type-checking.
+
+<Steps>
+  <Step title="Create a test project with .venv">
+    ```bash
+    mkdir ~/test-typemux
+    cd ~/test-typemux
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install requests  # Install a package to test imports
+    ```
+  </Step>
+  
+  <Step title="Create a Python file">
+    ```bash
+    cat > test.py << 'EOF'
+import requests
+
+def fetch_data(url: str) -> dict:
+    response = requests.get(url)
+    return response.json()
+
+# Intentional type error for testing
+result: int = fetch_data("https://api.github.com")
+EOF
+    ```
+  </Step>
+  
+  <Step title="Open the file in Claude Code">
+    Open `~/test-typemux/test.py` in Claude Code.
+  </Step>
+  
+  <Step title="Check for diagnostics">
+    You should see a type error diagnostic on the last line:
+    
+    ```
+    Type "dict[str, Any]" cannot be assigned to declared type "int"
+    ```
+    
+    This confirms:
+    - ✅ typemux-cc detected the `.venv`
+    - ✅ The backend loaded the `requests` package from `.venv/lib`
+    - ✅ Type-checking is working correctly
+  </Step>
+</Steps>
+
+<Tip>
+Enable logging to see detailed venv detection:
+
+```bash
+mkdir -p ~/.config/typemux-cc
+cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+export RUST_LOG="typemux_cc=debug"
+EOF
+```
+
+Then restart Claude Code and check `/tmp/typemux-cc.log` for venv detection logs.
+</Tip>
+
+## Optional: Configure Backend
+
+By default, typemux-cc uses pyright. To switch to ty or pyrefly:
+
+<Steps>
+  <Step title="Create config file">
+    ```bash
+    mkdir -p ~/.config/typemux-cc
+    ```
+  </Step>
+  
+  <Step title="Set backend preference">
+    <CodeGroup>
+    ```bash Use ty
+    cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_BACKEND="ty"
+EOF
+    ```
+    
+    ```bash Use pyrefly
+    cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_BACKEND="pyrefly"
+EOF
+    ```
+    
+    ```bash Use pyright (default)
+    cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_BACKEND="pyright"
+EOF
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Restart Claude Code">
+    Restart Claude Code to apply the new backend setting.
+  </Step>
+</Steps>
+
+<Info>
+Backend selection is explained in detail in the [backend selection guide](/usage/backend-selection).
+</Info>
+
+## Test Worktree Workflow
+
+Now let's test the killer feature: creating `.venv` **after** opening a file.
+
+<Steps>
+  <Step title="Create a worktree without .venv">
+    ```bash
+    cd ~/test-typemux
+    git init
+    git add -A
+    git commit -m "initial commit"
+    git worktree add ../test-typemux-worktree -b feature-branch
+    cd ../test-typemux-worktree
+    # Note: No .venv exists yet!
+    ```
+  </Step>
+  
+  <Step title="Open a file in Claude Code">
+    Open `~/test-typemux-worktree/test.py` in Claude Code.
+    
+    You'll see errors because no `.venv` exists — this is expected and correct behavior (strict venv mode).
+  </Step>
+  
+  <Step title="Create .venv while Claude Code is running">
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install requests
+    ```
+  </Step>
+  
+  <Step title="Reopen the file">
+    Close and reopen `test.py` in Claude Code.
+    
+    <Warning>
+    **Why do you need to reopen?** typemux-cc caches the venv path when a document is first opened. If `.venv` didn't exist at that time, the cache stores `None`. Reopening the file triggers a fresh venv search.
+    </Warning>
+    
+    After reopening, you should see type-checking working with the newly created `.venv`.
+  </Step>
+</Steps>
+
+**With the official plugin, you'd need to restart Claude Code at step 4.** With typemux-cc, you just reopen the file. That's the difference.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No diagnostics appearing">
+    **Check backend is installed:**
+    ```bash
+    which pyright-langserver  # or: which ty, which pyrefly
+    ```
+    
+    **Enable logging:**
+    ```bash
+    mkdir -p ~/.config/typemux-cc
+    cat > ~/.config/typemux-cc/config << 'EOF'
+export TYPEMUX_CC_LOG_FILE="/tmp/typemux-cc.log"
+export RUST_LOG="debug"
+EOF
+    ```
+    
+    Restart Claude Code and check `/tmp/typemux-cc.log` for errors.
+  </Accordion>
+  
+  <Accordion title="Plugin not appearing in settings.json">
+    The marketplace installation may have failed.
+    
+    **Verify marketplace was added:**
+    ```bash
+    /plugin marketplace list
+    ```
+    
+    **Reinstall:**
+    ```bash
+    /plugin marketplace remove typemux-cc-marketplace
+    /plugin marketplace add K-dash/typemux-cc
+    /plugin install typemux-cc@typemux-cc-marketplace
+    ```
+  </Accordion>
+  
+  <Accordion title=".venv not being detected">
+    **Verify pyvenv.cfg exists:**
+    ```bash
+    ls .venv/pyvenv.cfg
+    ```
+    
+    typemux-cc only recognizes `.venv` directories that contain `pyvenv.cfg`. Poetry, conda, and other environment managers are not supported.
+    
+    **Check git boundary:**
+    
+    If your file is outside the git repository, venv search may not traverse far enough. Enable trace logging:
+    ```bash
+    export RUST_LOG="trace"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+For more troubleshooting help, see the [common issues guide](/troubleshooting/common-issues).
+
+## Next Steps
+
+Now that typemux-cc is working, explore these topics:
+
+<CardGroup cols={2}>
+  <Card title="Git Worktrees" icon="code-branch" href="/usage/worktrees">
+    Learn best practices for worktree workflows
+  </Card>
+  <Card title="Monorepo Usage" icon="diagram-project" href="/usage/monorepos">
+    Manage multiple projects with different .venv paths
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Configure backend, logging, pool size, and TTL settings
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/advanced/architecture">
+    Understand how the multi-backend pool works
+  </Card>
+</CardGroup>
