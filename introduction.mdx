@@ -23,7 +23,7 @@ git worktree add ../my-project-worktree feat/new-feature
 cd ../my-project-worktree
 uv sync  # Creates .venv
 # 🔴 LSP still doesn't see the new .venv - must restart Claude Code
-```
+```bash
 
 This is especially painful with **git worktrees**, which are increasingly common in AI-assisted development workflows.
 
@@ -31,7 +31,7 @@ This is especially painful with **git worktrees**, which are increasingly common
 
 In monorepos with multiple Python projects, each project typically has its own `.venv` with different dependencies:
 
-```
+```text
 my-monorepo/
 ├── project-a/.venv/  # Uses Django 4.x
 ├── project-b/.venv/  # Uses FastAPI
@@ -64,7 +64,7 @@ typemux-cc addresses these problems through three core innovations:
 
 At a high level, typemux-cc works like this:
 
-```
+```text
 Claude Code (LSP Client)
          |
          | JSON-RPC over stdio
